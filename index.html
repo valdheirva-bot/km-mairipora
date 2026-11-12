@@ -36,6 +36,9 @@
     <!-- SheetJS CDN para Leitura de Arquivos Excel (.xlsx) -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
+    <!-- Supabase Client SDK para Banco de Dados em Nuvem -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; }
@@ -56,7 +59,9 @@
                 <div class="min-w-0">
                     <h1 class="font-bold text-base sm:text-lg leading-tight text-white flex items-center gap-1.5 truncate">
                         FleetControl <span class="hidden sm:inline">Mairiporã</span>
-                        <span class="text-[10px] sm:text-xs bg-brand-500/20 text-brand-400 font-semibold px-2 py-0.5 rounded-full border border-brand-500/30">Oficial</span>
+                        <span id="cloud-sync-badge" class="text-[10px] sm:text-xs bg-emerald-500/20 text-emerald-400 font-semibold px-2 py-0.5 rounded-full border border-emerald-500/30 flex items-center gap-1">
+                            <i class="fa-solid fa-cloud text-[9px]"></i> Nuvem Ativa
+                        </span>
                     </h1>
                     <p class="text-[11px] sm:text-xs text-gray-400 truncate">Gestão de Frota, Combustível & Trajetos</p>
                 </div>
@@ -625,6 +630,11 @@
 
     <!-- SCRIPT DE LÓGICA E DADOS INTEGRAIS -->
     <script>
+        // --- CONFIGURAÇÃO DO BANCO DE DADOS EM NUVEM (SUPABASE) ---
+        const SUPABASE_URL = "https://nuxvekjymquyyhxrkkez.supabase.co";
+        const SUPABASE_KEY = "sb_publishable_JM8KrC9xBulak96363DPSg_aihmnqP2";
+        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
         // --- BASE DE DADOS OFICIAL DE PONTOS DA PREFEITURA DE MAIRIPORÃ ---
         const DEFAULT_LOCATIONS = [
             { secretaria: "DTI", name: "DTI - SEDE DA TECNOLOGIA", address: "ALAMEDA TIBIRIÇA", number: "535", neighborhood: "CENTRO", cepFormatted: "07600-084", phone: "1146049000" },
@@ -683,9 +693,9 @@
         let tripDriverName = "";
 
         // INICIALIZAÇÃO DA PÁGINA
-        window.onload = function() {
-            loadLocations();
-            loadLogs();
+        window.onload = async function() {
+            await loadLocations();
+            await loadLogs();
             populatePrefeituraDropdown();
             renderLocationsTable();
             renderLogsTable();
@@ -705,6 +715,22 @@
             if (isOpenedLocally()) {
                 const banner = document.getElementById('local-file-banner');
                 if (banner) banner.classList.remove('hidden');
+            }
+        }
+
+        // Atualiza o indicador visual de status da nuvem no cabeçalho
+        function setCloudStatus(status) {
+            const badge = document.getElementById('cloud-sync-badge');
+            if (!badge) return;
+            if (status === 'syncing') {
+                badge.className = "text-[10px] sm:text-xs bg-amber-500/20 text-amber-400 font-semibold px-2 py-0.5 rounded-full border border-amber-500/30 flex items-center gap-1";
+                badge.innerHTML = `<i class="fa-solid fa-rotate fa-spin text-[9px]"></i> Sincronizando...`;
+            } else if (status === 'online') {
+                badge.className = "text-[10px] sm:text-xs bg-emerald-500/20 text-emerald-400 font-semibold px-2 py-0.5 rounded-full border border-emerald-500/30 flex items-center gap-1";
+                badge.innerHTML = `<i class="fa-solid fa-cloud-check text-[9px]"></i> Nuvem Conectada`;
+            } else {
+                badge.className = "text-[10px] sm:text-xs bg-rose-500/20 text-rose-400 font-semibold px-2 py-0.5 rounded-full border border-rose-500/30 flex items-center gap-1";
+                badge.innerHTML = `<i class="fa-solid fa-cloud-slash text-[9px]"></i> Modo Offline`;
             }
         }
 
@@ -1104,25 +1130,95 @@ Regras obrigatórias de leitura baseadas na palavra-âncora "km" / "KM":
             }
         }
 
-        // --- GESTÃO DE LOCAIS DA PREFEITURA ---
-        function loadLocations() {
+        // --- GESTÃO DE LOCAIS DA PREFEITURA (NUVEM + CACHE LOCAL) ---
+        async function loadLocations() {
+            setCloudStatus('syncing');
+            try {
+                const { data, error } = await supabaseClient
+                    .from('fleet_locations')
+                    .select('*')
+                    .order('id', { ascending: true });
+
+                if (!error && data && data.length > 0) {
+                    locations = data.map(row => ({
+                        id: row.id,
+                        secretaria: row.secretaria,
+                        name: row.name,
+                        address: row.address,
+                        number: row.number,
+                        neighborhood: row.neighborhood,
+                        cepFormatted: row.cep_formatted,
+                        phone: row.phone
+                    }));
+                    localStorage.setItem('fleet_locations_v3', JSON.stringify(locations));
+                    setCloudStatus('online');
+                    return;
+                } else if (!error && data && data.length === 0) {
+                    // Se o banco na nuvem ainda estiver vazio, envia os pontos padrão automaticamente
+                    locations = [...DEFAULT_LOCATIONS];
+                    await syncAllLocationsToCloud();
+                    setCloudStatus('online');
+                    return;
+                }
+            } catch (e) {
+                console.warn("Falha ao buscar pontos da nuvem, usando cache local:", e);
+            }
+
+            setCloudStatus('offline');
             const saved = localStorage.getItem('fleet_locations_v3');
             if (saved) {
-                try { locations = JSON.parse(saved); } catch(e) { locations = DEFAULT_LOCATIONS; }
+                try { locations = JSON.parse(saved); } catch(e) { locations = [...DEFAULT_LOCATIONS]; }
             } else {
-                locations = DEFAULT_LOCATIONS;
-                saveLocations();
+                locations = [...DEFAULT_LOCATIONS];
+            }
+        }
+
+        async function syncAllLocationsToCloud() {
+            localStorage.setItem('fleet_locations_v3', JSON.stringify(locations));
+            setCloudStatus('syncing');
+            try {
+                // Limpa registros antigos da tabela e insere a lista atualizada
+                await supabaseClient.from('fleet_locations').delete().neq('id', 0);
+                const payload = locations.map(loc => ({
+                    secretaria: loc.secretaria,
+                    name: loc.name,
+                    address: loc.address,
+                    number: loc.number,
+                    neighborhood: loc.neighborhood,
+                    cep_formatted: loc.cepFormatted,
+                    phone: loc.phone || ''
+                }));
+                const { data, error } = await supabaseClient.from('fleet_locations').insert(payload).select();
+                if (!error && data) {
+                    locations = data.map(row => ({
+                        id: row.id,
+                        secretaria: row.secretaria,
+                        name: row.name,
+                        address: row.address,
+                        number: row.number,
+                        neighborhood: row.neighborhood,
+                        cepFormatted: row.cep_formatted,
+                        phone: row.phone
+                    }));
+                    localStorage.setItem('fleet_locations_v3', JSON.stringify(locations));
+                    setCloudStatus('online');
+                } else {
+                    setCloudStatus('offline');
+                }
+            } catch (e) {
+                console.warn("Erro ao sincronizar pontos na nuvem:", e);
+                setCloudStatus('offline');
             }
         }
 
         function saveLocations() {
-            localStorage.setItem('fleet_locations_v3', JSON.stringify(locations));
+            syncAllLocationsToCloud();
         }
 
-        function restoreDefaultLocations() {
+        async function restoreDefaultLocations() {
             if (confirm("Deseja restaurar a lista padrão de pontos da Prefeitura de Mairiporã?")) {
-                locations = DEFAULT_LOCATIONS;
-                saveLocations();
+                locations = [...DEFAULT_LOCATIONS];
+                await syncAllLocationsToCloud();
                 populatePrefeituraDropdown();
                 renderLocationsTable();
             }
@@ -1880,8 +1976,38 @@ Regras obrigatórias de leitura baseadas na palavra-âncora "km" / "KM":
                 `${String(hrs).padStart(2,'0')}:${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
         }
 
-        // --- LANÇAMENTOS / HISTÓRICO ---
-        function loadLogs() {
+        // --- LANÇAMENTOS / HISTÓRICO (NUVEM + CACHE LOCAL) ---
+        async function loadLogs() {
+            setCloudStatus('syncing');
+            try {
+                const { data, error } = await supabaseClient
+                    .from('fleet_logs')
+                    .select('*')
+                    .order('datetime', { ascending: false });
+
+                if (!error && data) {
+                    logs = data.map(row => ({
+                        id: row.id,
+                        datetime: row.datetime,
+                        driver: row.driver,
+                        type: row.type,
+                        destination: row.destination,
+                        kmStart: row.km_start,
+                        kmEnd: row.km_end,
+                        kmDiff: row.km_diff,
+                        liters: row.liters,
+                        price: row.price,
+                        notes: row.notes
+                    }));
+                    localStorage.setItem('fleet_logs_v1', JSON.stringify(logs));
+                    setCloudStatus('online');
+                    return;
+                }
+            } catch (e) {
+                console.warn("Falha ao carregar histórico da nuvem, usando cache local:", e);
+            }
+
+            setCloudStatus('offline');
             const saved = localStorage.getItem('fleet_logs_v1');
             if (saved) {
                 try { logs = JSON.parse(saved); } catch(e) { logs = []; }
@@ -1991,7 +2117,7 @@ Regras obrigatórias de leitura baseadas na palavra-âncora "km" / "KM":
             document.getElementById('modal-log').classList.add('hidden');
         }
 
-        function saveLog(e) {
+        async function saveLog(e) {
             e.preventDefault();
             const newLog = {
                 datetime: document.getElementById('log-datetime').value,
@@ -2006,14 +2132,56 @@ Regras obrigatórias de leitura baseadas na palavra-âncora "km" / "KM":
                 notes: document.getElementById('log-notes').value.trim()
             };
 
+            setCloudStatus('syncing');
+            try {
+                const { data, error } = await supabaseClient
+                    .from('fleet_logs')
+                    .insert([{
+                        datetime: newLog.datetime,
+                        driver: newLog.driver,
+                        type: newLog.type,
+                        destination: newLog.destination,
+                        km_start: newLog.kmStart,
+                        km_end: newLog.kmEnd,
+                        km_diff: newLog.kmDiff,
+                        liters: newLog.liters,
+                        price: newLog.price,
+                        notes: newLog.notes
+                    }])
+                    .select();
+
+                if (!error && data && data[0]) {
+                    newLog.id = data[0].id;
+                    setCloudStatus('online');
+                } else {
+                    setCloudStatus('offline');
+                }
+            } catch (err) {
+                console.warn("Erro ao salvar registro na nuvem:", err);
+                setCloudStatus('offline');
+            }
+
             logs.unshift(newLog);
             saveLogsToStorage();
             renderLogsTable();
             closeLogModal();
         }
 
-        function deleteLog(idx) {
+        async function deleteLog(idx) {
             if (confirm("Deseja excluir este registro?")) {
+                const targetLog = logs[idx];
+                if (targetLog && targetLog.id) {
+                    setCloudStatus('syncing');
+                    try {
+                        const { error } = await supabaseClient
+                            .from('fleet_logs')
+                            .delete()
+                            .eq('id', targetLog.id);
+                        setCloudStatus(error ? 'offline' : 'online');
+                    } catch (err) {
+                        setCloudStatus('offline');
+                    }
+                }
                 logs.splice(idx, 1);
                 saveLogsToStorage();
                 renderLogsTable();
