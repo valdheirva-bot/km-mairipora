@@ -1,0 +1,2124 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FleetControl Mairiporã - Controle de Combustível & Trajeto</title>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                            900: '#0c4a6e',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- SheetJS CDN para Leitura de Arquivos Excel (.xlsx) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #111827; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
+    </style>
+</head>
+<body class="bg-slate-950 text-gray-100 min-h-screen flex flex-col font-sans antialiased selection:bg-brand-500 selection:text-white">
+
+    <!-- BARRA SUPERIOR / CABEÇALHO -->
+    <header class="bg-gray-900/90 backdrop-blur-md border-b border-gray-800 sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-3 py-2.5 sm:px-4 sm:py-3 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div class="flex items-center space-x-2.5">
+                <div class="p-2 sm:p-2.5 bg-brand-500/10 border border-brand-500/20 text-brand-500 rounded-xl shrink-0">
+                    <i class="fa-solid fa-building-flag text-lg sm:text-xl"></i>
+                </div>
+                <div class="min-w-0">
+                    <h1 class="font-bold text-base sm:text-lg leading-tight text-white flex items-center gap-1.5 truncate">
+                        FleetControl <span class="hidden sm:inline">Mairiporã</span>
+                        <span class="text-[10px] sm:text-xs bg-brand-500/20 text-brand-400 font-semibold px-2 py-0.5 rounded-full border border-brand-500/30">Oficial</span>
+                    </h1>
+                    <p class="text-[11px] sm:text-xs text-gray-400 truncate">Gestão de Frota, Combustível & Trajetos</p>
+                </div>
+            </div>
+
+            <!-- Navegação Principal Móvel / Desktop -->
+            <div class="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 custom-scrollbar">
+                <button onclick="switchTab('gps')" id="nav-gps" class="px-3 py-2 text-xs sm:text-sm font-medium rounded-xl bg-brand-600 text-white shadow-lg shadow-brand-600/20 transition flex items-center gap-1.5 shrink-0 min-h-[42px]">
+                    <i class="fa-solid fa-map-location-dot"></i> <span>GPS & Mapa</span>
+                </button>
+                <button onclick="switchTab('logs')" id="nav-logs" class="px-3 py-2 text-xs sm:text-sm font-medium rounded-xl bg-gray-800 text-gray-300 hover:bg-gray-700 transition flex items-center gap-1.5 shrink-0 min-h-[42px]">
+                    <i class="fa-solid fa-gas-pump"></i> <span>Histórico</span>
+                </button>
+                <button onclick="switchTab('locations')" id="nav-locations" class="px-3 py-2 text-xs sm:text-sm font-medium rounded-xl bg-gray-800 text-gray-300 hover:bg-gray-700 transition flex items-center gap-1.5 shrink-0 min-h-[42px]">
+                    <i class="fa-solid fa-city"></i> <span>Pontos</span>
+                </button>
+                <button onclick="exportToCSV()" class="px-2.5 py-2 text-xs sm:text-sm font-medium rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition flex items-center gap-1.5 shrink-0 min-h-[42px]" title="Exportar dados salvos em CSV">
+                    <i class="fa-solid fa-file-csv text-sm"></i> <span class="hidden sm:inline">CSV</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- CONTEÚDO PRINCIPAL -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-4 md:p-6 space-y-4 sm:space-y-6">
+
+        <!-- ================= TAB 1: PAINEL GPS E MAPA DE MAIRIPORÃ ================= -->
+        <div id="tab-gps" class="space-y-4 sm:space-y-6">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
+
+                <!-- CARD RASTREAMENTO GPS EM TEMPO REAL (ESQUERDA) -->
+                <div class="lg:col-span-4 bg-gray-900 border border-gray-800 rounded-2xl p-4 sm:p-5 flex flex-col justify-between shadow-xl space-y-4">
+                    <div class="space-y-3.5">
+                        <div class="flex items-center justify-between">
+                            <h2 class="text-sm sm:text-base font-semibold text-white flex items-center gap-2">
+                                <i class="fa-solid fa-location-arrow text-brand-500"></i> Rastreamento em Tempo Real
+                            </h2>
+                            <span id="gps-status" class="text-[11px] sm:text-xs px-2.5 py-0.5 rounded-full font-medium bg-gray-800 text-gray-400 border border-gray-700">
+                                Aguardando...
+                            </span>
+                        </div>
+
+                        <!-- Indicadores Numéricos do Percurso -->
+                        <div class="grid grid-cols-2 gap-2.5 pt-1">
+                            <div class="bg-gray-950 p-3 sm:p-4 rounded-xl border border-gray-800/80 text-center">
+                                <span class="text-[10px] sm:text-xs uppercase tracking-wider text-gray-400 font-semibold block mb-0.5">Distância</span>
+                                <div class="text-xl sm:text-2xl font-black text-brand-500 flex items-baseline justify-center gap-1">
+                                    <span id="gps-distance">0.00</span> <span class="text-[10px] sm:text-xs text-gray-400 font-normal">km</span>
+                                </div>
+                            </div>
+                            <div class="bg-gray-950 p-3 sm:p-4 rounded-xl border border-gray-800/80 text-center">
+                                <span class="text-[10px] sm:text-xs uppercase tracking-wider text-gray-400 font-semibold block mb-0.5">Tempo</span>
+                                <div class="text-xl sm:text-2xl font-black text-emerald-400 font-mono tracking-tight" id="gps-timer">
+                                    00:00:00
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Informações Complementares -->
+                        <div class="bg-gray-950/60 rounded-xl p-3 border border-gray-800 text-[11px] sm:text-xs space-y-1.5 text-gray-400">
+                            <div class="flex justify-between"><span>Velocidade:</span> <strong id="gps-speed" class="text-gray-200">0 km/h</strong></div>
+                            <div class="flex justify-between"><span>Precisão Sinal:</span> <strong id="gps-accuracy" class="text-gray-200">--</strong></div>
+                            <div class="flex flex-col gap-0.5 pt-1 border-t border-gray-800/80">
+                                <span class="text-gray-400">Ponto de Partida Ativo:</span> 
+                                <strong id="active-origin-display" class="text-emerald-400 font-medium leading-snug">DTI (Alameda Tibiriçá, 535, Centro - CEP: 07600-084)</strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Botões de Ação do Rastreamento -->
+                    <div class="grid grid-cols-2 gap-2.5 pt-2">
+                        <button id="btn-start-gps" onclick="startTracking()" class="py-3 px-3 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 font-semibold text-white text-xs sm:text-sm rounded-xl transition flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-900/30 min-h-[48px]">
+                            <i class="fa-solid fa-play"></i> Iniciar
+                        </button>
+                        <button id="btn-stop-gps" onclick="stopTracking()" disabled class="py-3 px-3 bg-rose-600/50 hover:bg-rose-600 font-semibold text-white text-xs sm:text-sm rounded-xl transition flex items-center justify-center gap-1.5 opacity-50 cursor-not-allowed min-h-[48px]">
+                            <i class="fa-solid fa-stop"></i> Parar
+                        </button>
+                    </div>
+                </div>
+
+                <!-- BANNER DE AVISO QUANDO ABERTO VIA WHATSAPP / ARQUIVO LOCAL -->
+                <div id="local-file-banner" class="hidden lg:col-span-12 bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div class="flex items-start gap-3">
+                        <div class="p-2 bg-amber-500/20 text-amber-400 rounded-xl shrink-0 mt-0.5">
+                            <i class="fa-solid fa-shield-halved text-base"></i>
+                        </div>
+                        <div class="text-xs text-gray-200 space-y-0.5">
+                            <p class="font-bold text-amber-400">Arquivo aberto localmente pelo WhatsApp (GPS bloqueado pelo Android/Chrome)</p>
+                            <p class="text-gray-300 leading-relaxed">Por segurança do celular, arquivos abertos via <code class="bg-gray-950 px-1.5 py-0.5 rounded text-amber-300">content://</code> não têm permissão de satélite. Você pode usar normalmente pelo <strong>KM do Painel</strong> ou publicar em um link HTTPS gratuito para liberar o GPS.</p>
+                        </div>
+                    </div>
+                    <button type="button" onclick="showHowToEnableGpsModal()" class="w-full sm:w-auto px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-gray-950 font-bold text-xs rounded-xl transition shrink-0 min-h-[38px]">
+                        Como Liberar o GPS?
+                    </button>
+                </div>
+
+                <!-- CARD MAPA INTERATIVO E CALCULADORA DE DISTÂNCIA DE MAIRIPORÃ (DIREITA) -->
+                <div class="lg:col-span-8 bg-gray-900 border border-gray-800 rounded-2xl p-4 sm:p-5 flex flex-col space-y-3.5 shadow-xl">
+                    <div>
+                        <h2 class="text-sm sm:text-base font-semibold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-calculator text-brand-500"></i> Calculadora de Distância - Mairiporã
+                        </h2>
+                        <p class="text-[11px] sm:text-xs text-gray-400">Selecione um ponto cadastrado da Prefeitura ou busque por endereço/CEP</p>
+                    </div>
+
+                    <!-- Formulário de Busca e Seleção por Secretaria -->
+                    <div class="space-y-3">
+                        <!-- SELETOR DE ORIGEM (PONTO DE PARTIDA) -->
+                        <div class="bg-gray-950/70 border border-gray-800/90 rounded-xl p-3 space-y-2.5">
+                            <div class="flex items-center justify-between">
+                                <label class="text-[11px] sm:text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
+                                    <i class="fa-solid fa-circle-dot"></i> Ponto de Partida (Origem):
+                                </label>
+                                <span id="origin-badge" class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">DTI Padrão</span>
+                            </div>
+                            
+                            <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                                <button type="button" id="orig-btn-dti" onclick="setOriginMode('dti')" class="py-2 px-2 rounded-lg text-[11px] font-semibold bg-emerald-600 text-white border border-emerald-500 transition flex items-center justify-center gap-1.5 min-h-[38px]">
+                                    <i class="fa-solid fa-building"></i> DTI (535)
+                                </button>
+                                <button type="button" id="orig-btn-gps" onclick="setOriginMode('gps')" class="py-2 px-2 rounded-lg text-[11px] font-medium bg-gray-900 text-gray-300 hover:bg-gray-800 border border-gray-700 transition flex items-center justify-center gap-1.5 min-h-[38px]">
+                                    <i class="fa-solid fa-crosshairs"></i> Local Atual
+                                </button>
+                                <button type="button" id="orig-btn-prefeitura" onclick="setOriginMode('prefeitura')" class="py-2 px-2 rounded-lg text-[11px] font-medium bg-gray-900 text-gray-300 hover:bg-gray-800 border border-gray-700 transition flex items-center justify-center gap-1.5 min-h-[38px]">
+                                    <i class="fa-solid fa-city"></i> Ponto Pref.
+                                </button>
+                                <button type="button" id="orig-btn-custom" onclick="setOriginMode('custom')" class="py-2 px-2 rounded-lg text-[11px] font-medium bg-gray-900 text-gray-300 hover:bg-gray-800 border border-gray-700 transition flex items-center justify-center gap-1.5 min-h-[38px]">
+                                    <i class="fa-solid fa-pen"></i> Digitar
+                                </button>
+                            </div>
+
+                            <!-- Sub-campo: Ponto da Prefeitura como Origem -->
+                            <div id="origin-prefeitura-box" class="hidden pt-1">
+                                <select id="origin-select" onchange="onOriginPrefeituraChange()" class="w-full bg-gray-900 border border-gray-700 rounded-xl p-2.5 text-xs text-gray-200 focus:outline-none focus:border-emerald-500 min-h-[42px]">
+                                    <option value="">-- Selecione o Ponto de Partida da Prefeitura --</option>
+                                </select>
+                            </div>
+
+                            <!-- Sub-campo: Endereço/CEP digitado como Origem -->
+                            <div id="origin-custom-box" class="hidden pt-1 flex gap-2">
+                                <input type="text" id="origin-custom-input" placeholder="Digite o endereço ou CEP de saída..." class="flex-1 bg-gray-900 border border-gray-700 rounded-xl py-2 px-3 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-emerald-500 min-h-[42px]">
+                                <button type="button" id="btn-confirm-origin" onclick="resolveCustomOrigin()" class="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl transition shrink-0 min-h-[42px]">
+                                    Definir
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- SELETOR DE DESTINO (CHEGADA) -->
+                        <div class="grid grid-cols-1 md:grid-cols-12 gap-2.5">
+                            <div class="md:col-span-12">
+                                <label class="block text-[11px] sm:text-xs font-medium text-brand-400 mb-1 flex items-center gap-1.5">
+                                    <i class="fa-solid fa-flag-checkered"></i> Destino (Ponto da Prefeitura ou Endereço):
+                                </label>
+                                <select id="calc-select" onchange="onPrefeituraSelectChange()" class="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-xs sm:text-sm text-gray-200 focus:outline-none focus:border-brand-500 min-h-[44px]">
+                                    <option value="">-- Escolha um Ponto da Prefeitura ou digite no campo abaixo --</option>
+                                </select>
+                            </div>
+                            <div class="md:col-span-8 relative">
+                                <input type="text" id="calc-address" placeholder="Ou digite o destino, Endereço ou CEP..." class="w-full bg-gray-950 border border-gray-800 rounded-xl py-2.5 pl-9 pr-3 text-xs sm:text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-brand-500 min-h-[44px]">
+                                <i class="fa-solid fa-magnifying-glass absolute left-3 top-3.5 text-gray-500 text-xs sm:text-sm"></i>
+                            </div>
+                            <div class="md:col-span-4">
+                                <button id="btn-calc-dist" onclick="calculateDistance()" class="w-full h-full py-2.5 px-3 bg-brand-600 hover:bg-brand-500 text-white font-medium text-xs sm:text-sm rounded-xl transition flex items-center justify-center gap-2 shadow-md shadow-brand-900/30 min-h-[44px]">
+                                    <i class="fa-solid fa-route"></i> Calcular Distância
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Caixa com Resultado do Cálculo -->
+                    <div id="dist-result-box" class="hidden bg-brand-500/10 border border-brand-500/30 rounded-xl p-3 sm:p-4 text-xs sm:text-sm text-brand-300 space-y-2.5">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between border-b border-brand-500/20 pb-2 gap-1">
+                            <div class="flex items-center gap-2">
+                                <i class="fa-solid fa-route text-brand-400 text-sm sm:text-base"></i>
+                                <span class="font-medium text-gray-200">Trajetos Disponíveis:</span>
+                            </div>
+                            <strong id="calc-dist-val" class="text-sm sm:text-base text-emerald-400 font-bold">0.00 km</strong>
+                        </div>
+                        
+                        <!-- Lista de Opções de Rota para o Motorista -->
+                        <div id="route-options-list" class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                            <!-- Preenchido dinamicamente com as opções de rota -->
+                        </div>
+                    </div>
+
+                    <!-- Elemento do Mapa Leaflet -->
+                    <div class="relative w-full h-[280px] sm:h-[360px] rounded-xl overflow-hidden border border-gray-800 z-0">
+                        <div id="map" class="w-full h-full bg-gray-950 relative z-0"></div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ================= TAB 2: LANÇAMENTOS E HISTÓRICO DE VIAGENS ================= -->
+        <div id="tab-logs" class="hidden space-y-4 sm:space-y-6">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                    <h2 class="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+                        <i class="fa-solid fa-rectangle-list text-brand-500"></i> Registro de Viagens & Abastecimento
+                    </h2>
+                    <p class="text-[11px] sm:text-xs text-gray-400">Controle simplificado de quilometragem, motorista, custos e médias</p>
+                </div>
+                <button onclick="openLogModal()" class="w-full sm:w-auto px-4 py-2.5 bg-brand-600 hover:bg-brand-500 text-white font-medium text-xs sm:text-sm rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-brand-600/20 min-h-[44px]">
+                    <i class="fa-solid fa-plus"></i> Novo Lançamento
+                </button>
+            </div>
+
+            <!-- Tabela e Visão Responsiva do Histórico -->
+            <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden shadow-xl">
+                <!-- Tabela em telas médias e superiores -->
+                <div class="hidden md:block overflow-x-auto">
+                    <table class="w-full text-left text-xs text-gray-300">
+                        <thead class="bg-gray-950 text-gray-400 uppercase tracking-wider text-[11px] font-semibold border-b border-gray-800">
+                            <tr>
+                                <th class="p-3.5">Data / Hora</th>
+                                <th class="p-3.5">Motorista</th>
+                                <th class="p-3.5">Tipo</th>
+                                <th class="p-3.5">Destino / Local</th>
+                                <th class="p-3.5 text-right">Km Início</th>
+                                <th class="p-3.5 text-right">Km Fim</th>
+                                <th class="p-3.5 text-right">Km Rodado</th>
+                                <th class="p-3.5 text-right">Litros</th>
+                                <th class="p-3.5 text-right">Valor R$</th>
+                                <th class="p-3.5 text-center">Média (Km/L)</th>
+                                <th class="p-3.5 text-center">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logs-table-body" class="divide-y divide-gray-800/60">
+                            <!-- Preenchido via JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Visão em Cards para Dispositivos Móveis -->
+                <div id="logs-mobile-list" class="block md:hidden divide-y divide-gray-800/80">
+                    <!-- Preenchido via JS para Mobile -->
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= TAB 3: CADASTRO E LOCAIS DA PREFEITURA DE MAIRIPORÃ ================= -->
+        <div id="tab-locations" class="hidden space-y-4 sm:space-y-6">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                    <h2 class="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+                        <i class="fa-solid fa-building-columns text-brand-500"></i> Pontos da Prefeitura
+                    </h2>
+                    <p class="text-[11px] sm:text-xs text-gray-400">Secretarias, Locais, Endereços, Bairros e CEPs</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <button onclick="restoreDefaultLocations()" class="flex-1 sm:flex-none px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs font-medium rounded-xl transition flex items-center justify-center gap-1.5 border border-gray-700 min-h-[40px]">
+                        <i class="fa-solid fa-rotate-left"></i> Padrão
+                    </button>
+                    <!-- Input oculto e botão de importação XLSX -->
+                    <input type="file" id="import-excel-input" accept=".xlsx, .xls" class="hidden" onchange="handleExcelImport(event)">
+                    <button onclick="document.getElementById('import-excel-input').click()" class="flex-1 sm:flex-none px-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-medium rounded-xl transition flex items-center justify-center gap-1.5 shadow-md shadow-emerald-900/20 min-h-[40px]">
+                        <i class="fa-solid fa-file-excel"></i> Excel (.xlsx)
+                    </button>
+                    <button onclick="openLocationModal()" class="w-full sm:w-auto px-4 py-2 text-white text-xs font-medium rounded-xl bg-brand-600 hover:bg-brand-500 transition flex items-center justify-center gap-1.5 shadow-lg shadow-brand-600/20 min-h-[40px]">
+                        <i class="fa-solid fa-plus"></i> Novo Ponto
+                    </button>
+                </div>
+            </div>
+
+            <!-- Filtro de Busca nos Pontos -->
+            <div class="bg-gray-900 p-3 sm:p-4 border border-gray-800 rounded-2xl">
+                <input type="text" id="search-locations" onkeyup="filterLocationsTable()" placeholder="Busca inteligente por Secretaria, Local, Endereço ou CEP..." class="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-xs sm:text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-brand-500 min-h-[44px]">
+            </div>
+
+            <!-- Tabela dos Locais Responsiva -->
+            <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden shadow-xl">
+                <div class="hidden md:block overflow-x-auto">
+                    <table class="w-full text-left text-xs text-gray-300">
+                        <thead class="bg-gray-950 text-gray-400 uppercase tracking-wider text-[11px] font-semibold border-b border-gray-800">
+                            <tr>
+                                <th class="p-3.5">Secretaria</th>
+                                <th class="p-3.5">Local / Unidade</th>
+                                <th class="p-3.5">Endereço Completo</th>
+                                <th class="p-3.5">Bairro</th>
+                                <th class="p-3.5">CEP Formato</th>
+                                <th class="p-3.5">Telefone</th>
+                                <th class="p-3.5 text-center">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="locations-table-body" class="divide-y divide-gray-800/60">
+                            <!-- Preenchido via JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Visão em Cards para Dispositivos Móveis -->
+                <div id="locations-mobile-list" class="block md:hidden divide-y divide-gray-800/80">
+                    <!-- Preenchido via JS para Mobile -->
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- MODAL DE SELEÇÃO DE ENDEREÇO PRECISO -->
+    <div id="modal-address-picker" style="z-index: 999999 !important; position: fixed; inset: 0;" class="bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 hidden">
+        <div style="z-index: 1000000 !important;" class="bg-gray-900 border border-gray-800 rounded-2xl max-w-lg w-full p-4 sm:p-6 space-y-4 shadow-2xl relative max-h-[90vh] flex flex-col">
+            <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+                <h3 id="address-picker-title" class="font-bold text-sm sm:text-base text-white flex items-center gap-2">
+                    <i class="fa-solid fa-location-crosshairs text-brand-500"></i> Confirme o Local Encontrado
+                </h3>
+                <button onclick="closeAddressPickerModal()" class="text-gray-400 hover:text-white p-1"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <p id="address-picker-subtitle" class="text-xs text-gray-400">Clique no local correto para confirmar a coordenada:</p>
+            
+            <div id="address-candidates-list" class="space-y-2 overflow-y-auto custom-scrollbar pr-1 flex-1 max-h-[50vh]">
+                <!-- Preenchido via JS com as opções -->
+            </div>
+
+            <div class="flex justify-end pt-2 border-t border-gray-800">
+                <button type="button" onclick="closeAddressPickerModal()" class="w-full sm:w-auto px-4 py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-medium rounded-xl transition min-h-[44px]">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DE INÍCIO DE PERCURSO (KM INICIAL COM LEITURA POR FOTO AI / OCR) -->
+    <div id="modal-start-km" style="z-index: 999999 !important; position: fixed; inset: 0;" class="bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 hidden">
+        <div style="z-index: 1000000 !important;" class="bg-gray-900 border border-gray-800 rounded-2xl max-w-md w-full p-4 sm:p-6 space-y-4 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+                <h3 class="font-bold text-sm sm:text-base text-white flex items-center gap-2">
+                    <i class="fa-solid fa-gauge-high text-emerald-400"></i> Informar KM Inicial do Veículo
+                </h3>
+                <button onclick="closeStartKmModal()" class="text-gray-400 hover:text-white p-1"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            
+            <p class="text-xs text-gray-400">Digite o KM do painel ou tire uma foto para o sistema ler a quilometragem automaticamente:</p>
+
+            <form onsubmit="confirmStartTrackingWithKm(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-300 mb-1">Nome do Motorista</label>
+                    <input type="text" id="start-driver-name" required placeholder="Digite o nome do motorista" class="w-full bg-gray-950 border border-gray-800 rounded-xl p-3 text-sm text-gray-100 focus:outline-none focus:border-emerald-500 min-h-[44px]">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-gray-300 mb-1">Quilometragem Inicial (KM Painel)</label>
+                    <div class="relative flex items-center">
+                        <input type="number" step="0.1" id="start-km-value" required placeholder="Ex: 85420.5" class="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 pl-3 pr-28 text-base font-bold text-emerald-400 focus:outline-none focus:border-emerald-500 min-h-[48px]">
+                        <input type="file" id="start-km-photo" accept="image/*" capture="environment" class="hidden" onchange="processDashboardPhoto(event, 'start-km-value', 'start-ocr-status')">
+                        <button type="button" onclick="document.getElementById('start-km-photo').click()" class="absolute right-1.5 px-3 py-2 bg-brand-600 hover:bg-brand-500 text-white text-xs font-medium rounded-lg transition flex items-center gap-1.5 min-h-[38px]">
+                            <i class="fa-solid fa-camera"></i> Foto Painel
+                        </button>
+                    </div>
+                    <span id="start-ocr-status" class="text-[11px] text-gray-400 block mt-1"></span>
+                </div>
+
+                <div class="flex flex-col-reverse sm:flex-row justify-end gap-2.5 pt-3 border-t border-gray-800">
+                    <button type="button" onclick="closeStartKmModal()" class="w-full sm:w-auto px-4 py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-medium rounded-xl transition min-h-[44px]">Cancelar</button>
+                    <button type="submit" class="w-full sm:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition shadow-lg shadow-emerald-900/40 flex items-center justify-center gap-2 min-h-[44px]">
+                        <i class="fa-solid fa-play"></i> Confirmar & Iniciar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL DE FINALIZAÇÃO DE PERCURSO (KM FINAL COM LEITURA POR FOTO AI / OCR) -->
+    <div id="modal-stop-km" style="z-index: 999999 !important; position: fixed; inset: 0;" class="bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 hidden">
+        <div style="z-index: 1000000 !important;" class="bg-gray-900 border border-gray-800 rounded-2xl max-w-md w-full p-4 sm:p-6 space-y-4 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+                <h3 class="font-bold text-sm sm:text-base text-white flex items-center gap-2">
+                    <i class="fa-solid fa-flag-checkered text-rose-500"></i> Informar KM Final do Veículo
+                </h3>
+                <button onclick="closeStopKmModal()" class="text-gray-400 hover:text-white p-1"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+
+            <!-- Resumo da viagem antes de salvar -->
+            <div class="bg-gray-950 p-3 sm:p-3.5 rounded-xl border border-gray-800 space-y-2 text-xs">
+                <div class="flex justify-between text-gray-300">
+                    <span>KM Inicial:</span>
+                    <strong id="summary-km-start" class="text-emerald-400 font-mono">--</strong>
+                </div>
+                <div class="flex justify-between text-gray-300">
+                    <span>Percorrido GPS:</span>
+                    <strong id="summary-km-gps" class="text-brand-400 font-mono">0.00 km</strong>
+                </div>
+                <div class="border-t border-gray-800 pt-2 flex justify-between items-center">
+                    <span class="font-semibold text-gray-200">Total Percorrido:</span>
+                    <span id="trip-total-calculated" class="text-xl sm:text-2xl font-black text-emerald-400 font-mono">0.00 km</span>
+                </div>
+            </div>
+
+            <form onsubmit="confirmStopTrackingWithKm(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-300 mb-1">Quilometragem Final (KM Painel)</label>
+                    <div class="relative flex items-center">
+                        <input type="number" step="0.1" id="stop-km-value" required oninput="calculateTripDifference()" placeholder="Ex: 85450.2" class="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 pl-3 pr-28 text-base font-bold text-rose-400 focus:outline-none focus:border-rose-500 min-h-[48px]">
+                        <input type="file" id="stop-km-photo" accept="image/*" capture="environment" class="hidden" onchange="processDashboardPhoto(event, 'stop-km-value', 'stop-ocr-status', calculateTripDifference)">
+                        <button type="button" onclick="document.getElementById('stop-km-photo').click()" class="absolute right-1.5 px-3 py-2 bg-brand-600 hover:bg-brand-500 text-white text-xs font-medium rounded-lg transition flex items-center gap-1.5 min-h-[38px]">
+                            <i class="fa-solid fa-camera"></i> Foto Painel
+                        </button>
+                    </div>
+                    <span id="stop-ocr-status" class="text-[11px] text-gray-400 block mt-1"></span>
+                </div>
+
+                <div class="flex flex-col-reverse sm:flex-row justify-end gap-2.5 pt-3 border-t border-gray-800">
+                    <button type="button" onclick="closeStopKmModal()" class="w-full sm:w-auto px-4 py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-medium rounded-xl transition min-h-[44px]">Cancelar</button>
+                    <button type="submit" class="w-full sm:w-auto px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl transition shadow-lg shadow-rose-900/40 flex items-center justify-center gap-2 min-h-[44px]">
+                        <i class="fa-solid fa-check"></i> Finalizar & Salvar Trajeto
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL DE AVISO / ERRO DE GPS PERSONALIZADO -->
+    <div id="modal-gps-error" style="z-index: 999999 !important; position: fixed; inset: 0;" class="bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 hidden">
+        <div style="z-index: 1000000 !important;" class="bg-gray-900 border border-amber-500/30 rounded-2xl max-w-md w-full p-4 sm:p-6 space-y-4 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center gap-3 border-b border-gray-800 pb-3">
+                <div class="p-2.5 bg-amber-500/10 text-amber-400 rounded-xl shrink-0">
+                    <i class="fa-solid fa-triangle-exclamation text-xl"></i>
+                </div>
+                <div>
+                    <h3 class="font-bold text-sm sm:text-base text-white">Sinal de GPS Indisponível</h3>
+                    <p class="text-[11px] sm:text-xs text-gray-400">Navegador ou arquivo local</p>
+                </div>
+            </div>
+            
+            <div id="gps-error-message" class="text-xs text-gray-300 space-y-2 leading-relaxed">
+                <!-- Preenchido dinamicamente com as instruções -->
+            </div>
+
+            <div class="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-3 border-t border-gray-800">
+                <button type="button" onclick="closeGpsErrorModal()" class="w-full sm:w-auto px-4 py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold rounded-xl transition min-h-[44px]">Fechar</button>
+                <button type="button" onclick="startManualKmTracking()" class="w-full sm:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-1.5 min-h-[44px]">
+                    <i class="fa-solid fa-gauge-high"></i> Continuar sem GPS (Usar KM)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DE LANÇAMENTO (VIAGEM / ABASTECIMENTO) -->
+    <div id="modal-log" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 hidden">
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl max-w-lg w-full p-4 sm:p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+                <h3 id="modal-log-title" class="font-bold text-sm sm:text-base text-white">Novo Lançamento</h3>
+                <button onclick="closeLogModal()" class="text-gray-400 hover:text-white p-1"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+
+            <form id="form-log" onsubmit="saveLog(event)" class="space-y-3.5">
+                <input type="hidden" id="log-id">
+                
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Data e Hora</label>
+                        <input type="datetime-local" id="log-datetime" required class="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-xs text-gray-200 focus:outline-none focus:border-brand-500 min-h-[44px]">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Motorista</label>
+                        <input type="text" id="log-driver" required placeholder="Nome do Motorista" class="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-xs text-gray-200 focus:outline-none focus:border-brand-500 min-h-[44px]">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Tipo de Registro</label>
+                        <select id="log-type" onchange="toggleLogTypeFields()" class="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-xs text-gray-200 focus:outline-none focus:border-brand-500 min-h-[44px]">
+                            <option value="Viagem">Viagem / Trajeto</option>
+                            <option value="Abastecimento">Abastecimento</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Local / Destino</label>
+                        <input type="text" id="trip-destination" placeholder="Endereço ou Prédio" class="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-xs text-gray-200 focus:outline-none focus:border-brand-500 min-h-[44px]">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-2 sm:gap-3">
+                    <div>
+                        <label class="block text-[11px] sm:text-xs font-medium text-gray-400 mb-1">Km Início</label>
+                        <input type="number" step="0.1" id="log-km-start" oninput="calcKmDiff()" class="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-xs text-gray-200 focus:outline-none focus:border-brand-500 min-h-[44px]">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] sm:text-xs font-medium text-gray-400 mb-1">Km Fim</label>
+                        <input type="number" step="0.1" id="log-km-end" oninput="calcKmDiff()" class="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-xs text-gray-200 focus:outline-none focus:border-brand-500 min-h-[44px]">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] sm:text-xs font-medium text-gray-400 mb-1">Km Rodado</label>
+                        <input type="number" step="0.1" id="log-km-diff" readonly class="w-full bg-gray-900 border border-gray-800 rounded-xl p-2.5 text-xs text-brand-400 font-bold min-h-[44px]">
+                    </div>
+                </div>
+
+                <!-- Campos específicos de abastecimento -->
+                <div id="fuel-fields" class="grid grid-cols-2 gap-3 hidden border-t border-gray-800 pt-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Litros Abastecidos</label>
+                        <input type="number" step="0.01" id="log-liters" placeholder="Ex: 40.5" class="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-xs text-gray-200 focus:outline-none focus:border-brand-500 min-h-[44px]">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Valor Total (R$)</label>
+                        <input type="number" step="0.01" id="log-price" placeholder="Ex: 220.00" class="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-xs text-gray-200 focus:outline-none focus:border-brand-500 min-h-[44px]">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium text-gray-400 mb-1">Observações / Detalhes</label>
+                    <textarea id="log-notes" rows="2" placeholder="Informações adicionais..." class="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-xs text-gray-200 focus:outline-none focus:border-brand-500"></textarea>
+                </div>
+
+                <div class="flex flex-col-reverse sm:flex-row justify-end gap-2.5 border-t border-gray-800 pt-3">
+                    <button type="button" onclick="closeLogModal()" class="w-full sm:w-auto px-4 py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-medium rounded-xl transition min-h-[44px]">Cancelar</button>
+                    <button type="submit" class="w-full sm:w-auto px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold rounded-xl transition min-h-[44px]">Salvar Registro</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL DE CADASTRO DE LOCAIS -->
+    <div id="modal-location" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 hidden">
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl max-w-lg w-full p-4 sm:p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+                <h3 id="modal-loc-title" class="font-bold text-sm sm:text-base text-white">Cadastrar Novo Ponto</h3>
+                <button onclick="closeLocationModal()" class="text-gray-400 hover:text-white p-1"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+
+            <form id="form-location" onsubmit="saveLocation(event)" class="space-y-3.5">
+                <input type="hidden" id="loc-id">
+                
+                <div>
+                    <label class="block text-xs font-medium text-gray-400 mb-1">Secretaria</label>
+                    <input type="text" id="loc-secretaria" required placeholder="Ex: SAÚDE, EDUCAÇÃO..." class="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-xs text-gray-200 focus:outline-none focus:border-brand-500 min-h-[44px]">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium text-gray-400 mb-1">Nome do Local / Unidade</label>
+                    <input type="text" id="loc-name" required placeholder="Ex: UBS Centro" class="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-xs text-gray-200 focus:outline-none focus:border-brand-500 min-h-[44px]">
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div class="sm:col-span-2">
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Endereço (Rua/Av)</label>
+                        <input type="text" id="loc-address" required placeholder="Nome do Logradouro" class="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-xs text-gray-200 focus:outline-none focus:border-brand-500 min-h-[44px]">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Número</label>
+                        <input type="text" id="loc-number" placeholder="Ex: 100 ou SN" class="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-xs text-gray-200 focus:outline-none focus:border-brand-500 min-h-[44px]">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Bairro</label>
+                        <input type="text" id="loc-neighborhood" placeholder="Bairro" class="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-xs text-gray-200 focus:outline-none focus:border-brand-500 min-h-[44px]">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">CEP</label>
+                        <input type="text" id="loc-cep" placeholder="07600-000" class="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-xs text-gray-200 focus:outline-none focus:border-brand-500 min-h-[44px]">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Telefone</label>
+                        <input type="text" id="loc-phone" placeholder="11 4419-0000" class="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-xs text-gray-200 focus:outline-none focus:border-brand-500 min-h-[44px]">
+                    </div>
+                </div>
+
+                <div class="flex flex-col-reverse sm:flex-row justify-end gap-2.5 border-t border-gray-800 pt-3">
+                    <button type="button" onclick="closeLocationModal()" class="w-full sm:w-auto px-4 py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-medium rounded-xl transition min-h-[44px]">Cancelar</button>
+                    <button type="submit" class="w-full sm:w-auto px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold rounded-xl transition min-h-[44px]">Salvar Ponto</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- SCRIPT DE LÓGICA E DADOS INTEGRAIS -->
+    <script>
+        // --- BASE DE DADOS OFICIAL DE PONTOS DA PREFEITURA DE MAIRIPORÃ ---
+        const DEFAULT_LOCATIONS = [
+            { secretaria: "DTI", name: "DTI - SEDE DA TECNOLOGIA", address: "ALAMEDA TIBIRIÇA", number: "535", neighborhood: "CENTRO", cepFormatted: "07600-084", phone: "1146049000" },
+            { secretaria: "SAÚDE", name: "ESF FERNÃO DIAS", address: "ALZIRA FERREIRA CAMPOS", number: "480", neighborhood: "MOINHO", cepFormatted: "07600-421", phone: "1144190823" },
+            { secretaria: "SAÚDE", name: "ESF CACEIA", address: "ANTONIO DO ESPIRITO SANTO", number: "SN", neighborhood: "CACEIA", cepFormatted: "07604-645", phone: "1144847030" },
+            { secretaria: "SAÚDE", name: "ESF CARAGUATÁ", address: "DUILIO LORENZI", number: "27", neighborhood: "CARAGUATA", cepFormatted: "07621-500", phone: "1144850549" },
+            { secretaria: "SEGURANÇA", name: "GGIM - TERRA PRETA", address: "JOAO PEDRO MIZIARA", number: "20", neighborhood: "TERRA PRETA", cepFormatted: "07661-505", phone: "1144861989" },
+            { secretaria: "SAÚDE", name: "ESF GUAVIRUTUVA", address: "JOSE GONCALVES", number: "SN", neighborhood: "GUAVIRUTUVA", cepFormatted: "07600-000", phone: "1144192184" },
+            { secretaria: "SAÚDE", name: "ESF TAPERA GRANDE", address: "MARIO ROMEIRO,VER", number: "SN", neighborhood: "PIRUCAIA", cepFormatted: "07638-010", phone: "1144834346" },
+            { secretaria: "SAÚDE", name: "ESF RIO ACIMA", address: "MUNICIPAL SANTO ANTONIO", number: "60", neighborhood: "RIO ACIMA", cepFormatted: "07631-315", phone: "1144190844" },
+            { secretaria: "SEGURANÇA", name: "SECRETARIA DE SEGURANÇA", address: "ALIPIO LEME", number: "308", neighborhood: "OLHO DAGUA", cepFormatted: "07601-100", phone: "1146044551" },
+            { secretaria: "SAÚDE", name: "ESF BARREIRO", address: "CELESTINO A TREVISAN,PE", number: "1500", neighborhood: "JD FERNAO DIAS", cepFormatted: "07611-425", phone: "1144196688" },
+            { secretaria: "SAÚDE", name: "ALMOXARIFADO DE MEDICAMENTOS", address: "JOSÉ SALOMÃO CHAMA", number: "850", neighborhood: "BARREIRO", cepFormatted: "07611-220", phone: "1144193628" },
+            { secretaria: "EDUCAÇÃO", name: "EM TAKAMISHI", address: "ANJO GABRIEL", number: "541", neighborhood: "CANJICA", cepFormatted: "07659-510", phone: "1144834392" },
+            { secretaria: "EDUCAÇÃO", name: "CEM ANADIR", address: "ANJO GABRIEL", number: "57", neighborhood: "CANJICA", cepFormatted: "07659-510", phone: "1146045161" }
+        ];
+
+        // --- ORIGEM PADRÃO: DTI MAIRIPORÃ ---
+        const DTI_DEFAULT = {
+            name: "DTI (Alameda Tibiriçá, 535, Centro - CEP: 07600-084)",
+            shortName: "DTI - Alameda Tibiriçá, 535",
+            address: "Alameda Tibiriçá, 535, Centro, Mairiporã - SP",
+            cep: "07600-084",
+            lat: -23.3224,
+            lng: -46.5892
+        };
+
+        // Origem dinâmica ativa (inicia no DTI)
+        let activeOrigin = { ...DTI_DEFAULT };
+        let originMode = 'dti';
+
+        // --- ESTADOS DA APLICAÇÃO ---
+        let locations = [];
+        let logs = [];
+        let map = null;
+        let dtiMarker = null;
+        let destinationMarker = null;
+        let routePolylines = []; // Array para guardar as camadas das rotas no mapa
+        let availableRoutes = []; // Guardar dados das rotas retornadas pelo OSRM
+        let selectedRouteIndex = 0;
+        let currentPosition = { lat: DTI_DEFAULT.lat, lng: DTI_DEFAULT.lng };
+        let userMarker = null;
+        
+        // Estado do GPS Rastreamento
+        let trackingWatchId = null;
+        let trackingStartTime = null;
+        let trackingTimerInterval = null;
+        let trackedPath = [];
+        let totalTrackedDistanceKm = 0;
+        let trackedPolyline = null; // Camada visual do trajeto real percorrido
+        let isManualKmMode = false; // Flag para modo de registro sem GPS ativo
+
+        // Guarda as leituras manuais ou por foto do odômetro do veículo
+        let tripStartKm = null;
+        let tripEndKm = null;
+        let tripDriverName = "";
+
+        // INICIALIZAÇÃO DA PÁGINA
+        window.onload = function() {
+            loadLocations();
+            loadLogs();
+            populatePrefeituraDropdown();
+            renderLocationsTable();
+            renderLogsTable();
+            setDefaultDate();
+            checkLocalProtocolRestriction();
+            
+            // Inicializar mapa após pequeno delay
+            setTimeout(initMap, 200);
+        };
+
+        // VERIFICA SE O ARQUIVO FOI ABERTO DIRETO DO WHATSAPP OU GERENCIADOR DE ARQUIVOS
+        function isOpenedLocally() {
+            return window.location.protocol === 'content:' || window.location.protocol === 'file:';
+        }
+
+        function checkLocalProtocolRestriction() {
+            if (isOpenedLocally()) {
+                const banner = document.getElementById('local-file-banner');
+                if (banner) banner.classList.remove('hidden');
+            }
+        }
+
+        function showHowToEnableGpsModal() {
+            showGpsError(`
+                <div class="space-y-2.5">
+                    <p><strong class="text-amber-400">Por que o GPS não ativa neste arquivo?</strong><br>
+                    Olhe a barra de endereço no topo da sua tela: ela começa com <code class="bg-gray-950 px-1.5 py-0.5 rounded text-amber-300">content://com.whatsapp...</code>. O Google Chrome e o Android bloqueiam o GPS em arquivos HTML abertos direto do WhatsApp por regra de segurança.</p>
+                    
+                    <p><strong class="text-emerald-400">2 Formas de Resolver:</strong></p>
+                    <ul class="list-disc pl-4 space-y-1.5 text-gray-300">
+                        <li><strong>Opção 1 (Imediata - Sem internet/servidor):</strong> Use o botão <strong>Iniciar</strong> normalmente! O app registra o <strong>KM Inicial e Final</strong> (inclusive lendo a foto do painel) e calcula a distância exata entre os pontos de Mairiporã.</li>
+                        <li><strong>Opção 2 (Para liberar o GPS ao vivo no celular):</strong> Hospede este arquivo HTML em qualquer link seguro (<code class="text-brand-400">https://</code>), como <strong>Netlify Drop</strong> (app.netlify.com/drop — basta arrastar o arquivo HTML lá em 10 segundos), <strong>GitHub Pages</strong> ou no servidor intranet/HTTPS da Prefeitura.</li>
+                    </ul>
+                </div>
+            `);
+        }
+
+        // ALTERNÂNCIA DE ABAS
+        function switchTab(tabName) {
+            const tabs = ['gps', 'logs', 'locations'];
+            
+            tabs.forEach(tab => {
+                const contentEl = document.getElementById(`tab-${tab}`);
+                const navBtn = document.getElementById(`nav-${tab}`);
+                
+                if (tab === tabName) {
+                    if (contentEl) contentEl.classList.remove('hidden');
+                    if (navBtn) {
+                        navBtn.className = "px-4 py-2 text-sm font-medium rounded-lg bg-brand-600 text-white shadow-lg shadow-brand-600/20 transition flex items-center gap-2";
+                    }
+                } else {
+                    if (contentEl) contentEl.classList.add('hidden');
+                    if (navBtn) {
+                        navBtn.className = "px-4 py-2 text-sm font-medium rounded-lg bg-gray-800 text-gray-300 hover:bg-gray-700 transition flex items-center gap-2";
+                    }
+                }
+            });
+
+            // Se mudou para a aba do mapa, recalcula a renderização do mapa Leaflet
+            if (tabName === 'gps' && map) {
+                setTimeout(() => {
+                    map.invalidateSize();
+                }, 150);
+            }
+        }
+
+        // --- RASTREAMENTO GPS TEMPO REAL E LEITURA DE PAINEL POR FOTO ---
+        function startTracking() {
+            // Abre diretamente o modal de KM Inicial (funciona tanto com GPS ativo quanto em modo Odômetro)
+            document.getElementById('modal-start-km').classList.remove('hidden');
+        }
+
+        function closeStartKmModal() {
+            document.getElementById('modal-start-km').classList.add('hidden');
+        }
+
+        function closeGpsErrorModal() {
+            document.getElementById('modal-gps-error').classList.add('hidden');
+        }
+
+        function showGpsError(msgHtml) {
+            document.getElementById('gps-error-message').innerHTML = msgHtml;
+            document.getElementById('modal-gps-error').classList.remove('hidden');
+        }
+
+        function confirmStartTrackingWithKm(e) {
+            e.preventDefault();
+            const kmInput = parseFloat(document.getElementById('start-km-value').value);
+            const driver = document.getElementById('start-driver-name').value.trim();
+
+            if (isNaN(kmInput) || kmInput < 0) {
+                showGpsError("<p>Por favor, informe uma quilometragem inicial válida antes de iniciar.</p>");
+                return;
+            }
+
+            tripStartKm = kmInput;
+            tripDriverName = driver;
+            isManualKmMode = false;
+
+            closeStartKmModal();
+
+            // Prepara botões e contadores da viagem
+            document.getElementById('btn-start-gps').disabled = true;
+            document.getElementById('btn-start-gps').classList.add('opacity-50', 'cursor-not-allowed');
+            document.getElementById('btn-stop-gps').disabled = false;
+            document.getElementById('btn-stop-gps').classList.remove('opacity-50', 'bg-rose-600/50', 'cursor-not-allowed');
+            document.getElementById('btn-stop-gps').classList.add('bg-rose-600');
+
+            trackedPath = [];
+            totalTrackedDistanceKm = 0;
+            trackingStartTime = new Date();
+
+            if (trackedPolyline) map.removeLayer(trackedPolyline);
+            trackedPolyline = L.polyline([], { color: '#10b981', weight: 5, opacity: 0.9 }).addTo(map);
+
+            if (trackingTimerInterval) clearInterval(trackingTimerInterval);
+            trackingTimerInterval = setInterval(updateTimer, 1000);
+
+            // Verifica se o navegador suporta geolocalização e se não está bloqueado por protocolo local (WhatsApp/file)
+            const isLocalProtocol = window.location.protocol === 'content:' || window.location.protocol === 'file:';
+            
+            if (!navigator.geolocation || isLocalProtocol) {
+                activateOdometroFallback("Arquivo aberto localmente (WhatsApp/Offline). Rastreando via Cronômetro e KM do Painel.");
+                return;
+            }
+
+            document.getElementById('gps-status').innerText = "Buscando Satélite...";
+            document.getElementById('gps-status').className = "text-[11px] sm:text-xs px-2.5 py-0.5 rounded-full font-medium bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse";
+
+            startGeolocationWatch(true);
+        }
+
+        function activateOdometroFallback(reasonText = "") {
+            isManualKmMode = true;
+            document.getElementById('gps-status').innerText = "Modo Odômetro (KM)";
+            document.getElementById('gps-status').className = "text-[11px] sm:text-xs px-2.5 py-0.5 rounded-full font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+            document.getElementById('gps-accuracy').innerText = "Manual / Painel";
+            if (reasonText) {
+                console.info(reasonText);
+            }
+        }
+
+        function startManualKmTracking() {
+            closeGpsErrorModal();
+            activateOdometroFallback();
+        }
+
+        function startGeolocationWatch(highAccuracy = true) {
+            if (trackingWatchId !== null) navigator.geolocation.clearWatch(trackingWatchId);
+
+            trackingWatchId = navigator.geolocation.watchPosition(
+                position => {
+                    document.getElementById('gps-status').innerText = "GPS Ativo";
+                    document.getElementById('gps-status').className = "text-[11px] sm:text-xs px-2.5 py-0.5 rounded-full font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 animate-pulse";
+
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+                    const speed = position.coords.speed ? (position.coords.speed * 3.6).toFixed(1) : 0;
+                    const accuracy = position.coords.accuracy ? Math.round(position.coords.accuracy) + 'm' : '--';
+
+                    currentPosition = { lat, lng };
+
+                    document.getElementById('gps-speed').innerText = `${speed} km/h`;
+                    document.getElementById('gps-accuracy').innerText = accuracy;
+
+                    const userIcon = L.divIcon({
+                        className: 'custom-user-icon',
+                        html: `<div style="background-color:#0ea5e9;width:20px;height:20px;border-radius:50%;border:3px solid white;box-shadow:0 0 12px rgba(14,165,233,0.9);"></div>`,
+                        iconSize: [20, 20],
+                        iconAnchor: [10, 10]
+                    });
+
+                    if (!userMarker) {
+                        userMarker = L.marker([lat, lng], { icon: userIcon }).addTo(map).bindPopup("Sua Localização GPS");
+                    } else {
+                        userMarker.setLatLng([lat, lng]);
+                    }
+
+                    if (trackedPath.length > 0) {
+                        const lastPoint = trackedPath[trackedPath.length - 1];
+                        const stepDist = calculateHaversineDistance(lastPoint.lat, lastPoint.lng, lat, lng);
+                        if (stepDist > 0.005) {
+                            totalTrackedDistanceKm += stepDist;
+                            trackedPath.push({ lat, lng });
+                            trackedPolyline.addLatLng([lat, lng]);
+                            map.panTo([lat, lng]);
+                        }
+                    } else {
+                        trackedPath.push({ lat, lng });
+                        trackedPolyline.addLatLng([lat, lng]);
+                    }
+
+                    document.getElementById('gps-distance').innerText = totalTrackedDistanceKm.toFixed(2);
+                },
+                err => {
+                    console.warn("Aviso GPS:", err.message);
+                    if (err.code === err.PERMISSION_DENIED) {
+                        // Se o celular negou permissão de satélite, muda automaticamente para o modo Odômetro sem travar
+                        activateOdometroFallback();
+                        showGpsError(`
+                            <p><strong class="text-amber-400">Permissão de GPS bloqueada pelo celular.</strong></p>
+                            <p>Não se preocupe: o aplicativo já iniciou a contagem do seu percurso no <strong>Modo Odômetro (KM)</strong>!</p>
+                            <p class="text-gray-400 mt-1">Ao finalizar a corrida, basta informar ou fotografar o KM Final do painel.</p>
+                        `);
+                    } else if (highAccuracy) {
+                        // Tenta novamente com precisão padrão (rede/Wi-Fi) antes de desistir
+                        startGeolocationWatch(false);
+                    } else {
+                        activateOdometroFallback();
+                    }
+                },
+                { enableHighAccuracy: highAccuracy, timeout: 10000, maximumAge: 5000 }
+            );
+        }
+
+        function stopTracking() {
+            // Abre o modal para captura do KM final
+            document.getElementById('summary-km-start').innerText = tripStartKm !== null ? `${tripStartKm.toFixed(1)} km` : '--';
+            document.getElementById('summary-km-gps').innerText = isManualKmMode ? 'Modo Odômetro' : `${totalTrackedDistanceKm.toFixed(2)} km`;
+            document.getElementById('stop-km-value').value = tripStartKm !== null ? (tripStartKm + totalTrackedDistanceKm).toFixed(1) : '';
+            calculateTripDifference();
+            
+            document.getElementById('modal-stop-km').classList.remove('hidden');
+        }
+
+        function closeStopKmModal() {
+            document.getElementById('modal-stop-km').classList.add('hidden');
+        }
+
+        function calculateTripDifference() {
+            const start = tripStartKm || 0;
+            const end = parseFloat(document.getElementById('stop-km-value').value);
+            const displayEl = document.getElementById('trip-total-calculated');
+            
+            if (!isNaN(end) && end >= start) {
+                const diff = end - start;
+                displayEl.innerText = `${diff.toFixed(2)} km`;
+                displayEl.className = "text-xl sm:text-2xl font-black text-emerald-400 font-mono";
+            } else {
+                displayEl.innerText = "KM final inválido";
+                displayEl.className = "text-sm sm:text-base font-bold text-rose-400";
+            }
+        }
+
+        function confirmStopTrackingWithKm(e) {
+            e.preventDefault();
+            const endKm = parseFloat(document.getElementById('stop-km-value').value);
+
+            if (isNaN(endKm) || (tripStartKm !== null && endKm < tripStartKm)) {
+                showGpsError("<p>O KM final deve ser maior ou igual ao KM inicial informado no começo da viagem.</p>");
+                return;
+            }
+
+            tripEndKm = endKm;
+
+            if (trackingWatchId !== null) navigator.geolocation.clearWatch(trackingWatchId);
+            if (trackingTimerInterval) clearInterval(trackingTimerInterval);
+
+            document.getElementById('btn-start-gps').disabled = false;
+            document.getElementById('btn-start-gps').classList.remove('opacity-50', 'cursor-not-allowed');
+            document.getElementById('btn-stop-gps').disabled = true;
+            document.getElementById('btn-stop-gps').classList.add('opacity-50', 'bg-rose-600/50', 'cursor-not-allowed');
+
+            document.getElementById('gps-status').innerText = "Finalizado";
+            document.getElementById('gps-status').className = "text-[11px] sm:text-xs px-2.5 py-0.5 rounded-full font-medium bg-gray-800 text-gray-400 border border-gray-700";
+
+            closeStopKmModal();
+
+            // Abre o registro oficial de lançamentos já preenchido
+            openLogModal();
+            if (tripDriverName) document.getElementById('log-driver').value = tripDriverName;
+            if (tripStartKm !== null) document.getElementById('log-km-start').value = tripStartKm;
+            document.getElementById('log-km-end').value = tripEndKm;
+            calcKmDiff();
+        }
+
+        // LEITURA INTELIGENTE DE PAINEL COM GEMINI VISION API (OCR)
+        async function processDashboardPhoto(event, targetInputId, statusSpanId, callbackOnSuccess = null) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const statusEl = document.getElementById(statusSpanId);
+            statusEl.innerHTML = `<span class="text-amber-400"><i class="fa-solid fa-spinner fa-spin"></i> Localizando "KM" e lendo hodômetro...</span>`;
+
+            try {
+                // Otimiza/redimensiona a foto da câmera do celular para envio rápido e preciso
+                const base64Data = await resizeImageToBase64(file, 1024);
+
+                const systemPrompt = `Você é um especialista em visão computacional automotiva para leitura de hodômetros (odometer) em painéis de veículos (analógicos e digitais).
+Regras obrigatórias de leitura baseadas na palavra-âncora "km" / "KM":
+1. Localize a palavra ou unidade "km" (ou "KM") no visor/mostrador do painel.
+2. Os dígitos do hodômetro total ficam imediatamente ABAIXO, AO LADO (esquerda) ou ACIMA da palavra "km":
+   - Painel analógico (ex: "km" acima dos roletes): leia os dígitos principais e o último dígito decimal (fundo claro/diferente) como casa decimal (ex: 73407 e 2 -> 73407.2).
+   - Painel digital com "trip km" e "km": IGNORE o valor marcado como "trip" (parcial) e extraia APENAS o valor principal associado a "km" (ex: 5785).
+   - Painel digital com autonomia (ícone carro -> bomba, ex: "194 km") e hodômetro total na base (ex: "003444 km"): IGNORE a autonomia/consumo (km/l) e extraia o hodômetro total na parte inferior (ex: 3444).
+3. Ignore sempre velocímetro ("km/h"), conta-giros (RPM), relógio e temperatura.
+4. Converta zeros à esquerda em número limpo (ex: "003444" -> 3444).`;
+
+                const userQuery = "Identifique a palavra 'km' neste painel e extraia exatamente o valor numérico do hodômetro total associado a ela.";
+
+                const apiKey = ""; // Chave fornecida automaticamente pelo ambiente
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+
+                const payload = {
+                    contents: [
+                        {
+                            role: "user",
+                            parts: [
+                                { text: userQuery },
+                                {
+                                    inlineData: {
+                                        mimeType: "image/jpeg",
+                                        data: base64Data
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    systemInstruction: { parts: [{ text: systemPrompt }] },
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: "OBJECT",
+                            properties: {
+                                km: {
+                                    type: "NUMBER",
+                                    nullable: true,
+                                    description: "Valor numérico exato do hodômetro total lido próximo à palavra km"
+                                },
+                                positionFound: {
+                                    type: "STRING",
+                                    description: "Onde o número foi encontrado em relação à palavra km (ex: abaixo de km, ao lado de km, acima de km)"
+                                }
+                            },
+                            required: ["km"]
+                        }
+                    }
+                };
+
+                // Chamada com retry e exponential backoff
+                const result = await fetchWithBackoff(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const textResponse = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                if (textResponse) {
+                    const jsonParsed = JSON.parse(textResponse);
+                    if (jsonParsed && jsonParsed.km !== null && !isNaN(jsonParsed.km)) {
+                        document.getElementById(targetInputId).value = jsonParsed.km;
+                        const detail = jsonParsed.positionFound ? ` (${jsonParsed.positionFound})` : '';
+                        statusEl.innerHTML = `<span class="text-emerald-400 font-semibold"><i class="fa-solid fa-circle-check"></i> KM lido: ${jsonParsed.km} km${detail}</span>`;
+                        if (callbackOnSuccess) callbackOnSuccess();
+                        return;
+                    }
+                }
+
+                statusEl.innerHTML = `<span class="text-rose-400"><i class="fa-solid fa-triangle-exclamation"></i> Não foi possível identificar o número próximo a "KM". Digite manualmente.</span>`;
+
+            } catch (err) {
+                statusEl.innerHTML = `<span class="text-rose-400"><i class="fa-solid fa-triangle-exclamation"></i> Falha ao processar foto. Digite o KM manualmente.</span>`;
+            } finally {
+                event.target.value = "";
+            }
+        }
+
+        // Redimensiona a foto antes de enviar para garantir velocidade no 4G/celular
+        function resizeImageToBase64(file, maxDimension = 1024) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const img = new Image();
+                    img.onload = function() {
+                        let width = img.width;
+                        let height = img.height;
+                        if (width > maxDimension || height > maxDimension) {
+                            if (width > height) {
+                                height = Math.round((height * maxDimension) / width);
+                                width = maxDimension;
+                            } else {
+                                width = Math.round((width * maxDimension) / height);
+                                height = maxDimension;
+                            }
+                        }
+                        const canvas = document.createElement('canvas');
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                        resolve(dataUrl.split(',')[1]);
+                    };
+                    img.onerror = reject;
+                    img.src = e.target.result;
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // Requisição com Exponential Backoff
+        async function fetchWithBackoff(url, options, maxRetries = 3) {
+            let delay = 1000;
+            for (let attempt = 0; attempt <= maxRetries; attempt++) {
+                const response = await fetch(url, options);
+                if (response.ok) {
+                    return await response.json();
+                }
+                if (attempt === maxRetries) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                await new Promise(res => setTimeout(res, delay));
+                delay *= 2;
+            }
+        }
+
+        // --- GESTÃO DE LOCAIS DA PREFEITURA ---
+        function loadLocations() {
+            const saved = localStorage.getItem('fleet_locations_v3');
+            if (saved) {
+                try { locations = JSON.parse(saved); } catch(e) { locations = DEFAULT_LOCATIONS; }
+            } else {
+                locations = DEFAULT_LOCATIONS;
+                saveLocations();
+            }
+        }
+
+        function saveLocations() {
+            localStorage.setItem('fleet_locations_v3', JSON.stringify(locations));
+        }
+
+        function restoreDefaultLocations() {
+            if (confirm("Deseja restaurar a lista padrão de pontos da Prefeitura de Mairiporã?")) {
+                locations = DEFAULT_LOCATIONS;
+                saveLocations();
+                populatePrefeituraDropdown();
+                renderLocationsTable();
+            }
+        }
+
+        function populatePrefeituraDropdown() {
+            const selectDest = document.getElementById('calc-select');
+            const selectOrig = document.getElementById('origin-select');
+            
+            selectDest.innerHTML = '<option value="">-- Escolha um Ponto da Prefeitura ou digite no campo abaixo --</option>';
+            if (selectOrig) {
+                selectOrig.innerHTML = '<option value="">-- Selecione o Ponto de Partida da Prefeitura --</option>';
+            }
+            
+            const grouped = {};
+            locations.forEach((loc, idx) => {
+                const sec = loc.secretaria || 'GERAL';
+                if (!grouped[sec]) grouped[sec] = [];
+                grouped[sec].push({ ...loc, originalIndex: idx });
+            });
+
+            for (const sec in grouped) {
+                const optGroupDest = document.createElement('optgroup');
+                optGroupDest.label = `SECRETARIA DE ${sec}`;
+                
+                const optGroupOrig = document.createElement('optgroup');
+                optGroupOrig.label = `SECRETARIA DE ${sec}`;
+
+                grouped[sec].forEach(loc => {
+                    const labelText = `${loc.name} - ${loc.address}, ${loc.number} (${loc.neighborhood}) - CEP: ${loc.cepFormatted}`;
+                    
+                    const optD = document.createElement('option');
+                    optD.value = loc.originalIndex;
+                    optD.textContent = labelText;
+                    optGroupDest.appendChild(optD);
+
+                    if (selectOrig) {
+                        const optO = document.createElement('option');
+                        optO.value = loc.originalIndex;
+                        optO.textContent = labelText;
+                        optGroupOrig.appendChild(optO);
+                    }
+                });
+                selectDest.appendChild(optGroupDest);
+                if (selectOrig) selectOrig.appendChild(optGroupOrig);
+            }
+        }
+
+        // --- CONTROLE DINÂMICO DO PONTO DE PARTIDA (ORIGEM) ---
+        function setOriginMode(mode) {
+            originMode = mode;
+            const modes = ['dti', 'gps', 'prefeitura', 'custom'];
+            
+            modes.forEach(m => {
+                const btn = document.getElementById(`orig-btn-${m}`);
+                if (btn) {
+                    if (m === mode) {
+                        btn.className = "py-2 px-2 rounded-lg text-[11px] font-semibold bg-emerald-600 text-white border border-emerald-500 transition flex items-center justify-center gap-1.5 min-h-[38px]";
+                    } else {
+                        btn.className = "py-2 px-2 rounded-lg text-[11px] font-medium bg-gray-900 text-gray-300 hover:bg-gray-800 border border-gray-700 transition flex items-center justify-center gap-1.5 min-h-[38px]";
+                    }
+                }
+            });
+
+            document.getElementById('origin-prefeitura-box').classList.toggle('hidden', mode !== 'prefeitura');
+            document.getElementById('origin-custom-box').classList.toggle('hidden', mode !== 'custom');
+
+            if (mode === 'dti') {
+                updateActiveOrigin({ ...DTI_DEFAULT }, "DTI Padrão");
+            } else if (mode === 'gps') {
+                captureCurrentGpsAsOrigin();
+            }
+        }
+
+        function updateActiveOrigin(newOrigin, badgeText) {
+            activeOrigin = newOrigin;
+            document.getElementById('active-origin-display').innerText = activeOrigin.name;
+            document.getElementById('origin-badge').innerText = badgeText;
+
+            if (map && dtiMarker) {
+                dtiMarker.setLatLng([activeOrigin.lat, activeOrigin.lng]);
+                dtiMarker.setPopupContent(`<b>PONTO DE PARTIDA ATIVO</b><br>${activeOrigin.name}`).openPopup();
+                map.panTo([activeOrigin.lat, activeOrigin.lng]);
+            }
+
+            // Se já houver um destino marcado no mapa, recalcula a rota automaticamente com a nova origem
+            if (destinationMarker) {
+                const destLatLng = destinationMarker.getLatLng();
+                const destLabel = document.getElementById('trip-destination').value || "Destino Selecionado";
+                renderRouteOnMap(destLatLng.lat, destLatLng.lng, destLabel);
+            }
+        }
+
+        function captureCurrentGpsAsOrigin() {
+            const badge = document.getElementById('origin-badge');
+            badge.innerText = "Buscando GPS...";
+
+            if (isOpenedLocally()) {
+                showHowToEnableGpsModal();
+                setOriginMode('dti');
+                return;
+            }
+
+            if (!navigator.geolocation) {
+                showGpsError("<p>Seu navegador não suporta captura de localização GPS atual. Escolha outro ponto de partida.</p>");
+                setOriginMode('dti');
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                pos => {
+                    const lat = pos.coords.latitude;
+                    const lng = pos.coords.longitude;
+                    currentPosition = { lat, lng };
+                    updateActiveOrigin({
+                        name: `Localização Atual GPS (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
+                        shortName: "Localização Atual (GPS)",
+                        lat,
+                        lng
+                    }, "GPS Atual");
+                },
+                err => {
+                    showHowToEnableGpsModal();
+                    setOriginMode('dti');
+                },
+                { enableHighAccuracy: true, timeout: 10000 }
+            );
+        }
+
+        async function onOriginPrefeituraChange() {
+            const idx = document.getElementById('origin-select').value;
+            if (idx === "") return;
+            const loc = locations[parseInt(idx)];
+            const badge = document.getElementById('origin-badge');
+            badge.innerText = "Localizando...";
+
+            const candidates = await searchLocationCandidates(loc, "");
+            if (candidates.length === 1) {
+                updateActiveOrigin({
+                    name: `${loc.name} - ${loc.address}, ${loc.number} (${loc.neighborhood})`,
+                    shortName: loc.name,
+                    lat: candidates[0].lat,
+                    lng: candidates[0].lon
+                }, "Ponto Prefeitura");
+            } else if (candidates.length > 1) {
+                openAddressPickerModal(candidates, 'origin', `${loc.name} - ${loc.address}, ${loc.number}`);
+            } else {
+                showGpsError("<p>Não foi possível geocodificar este ponto da Prefeitura no mapa. Tente digitar o endereço manualmente.</p>");
+                badge.innerText = "Não encontrado";
+            }
+        }
+
+        async function resolveCustomOrigin() {
+            const query = document.getElementById('origin-custom-input').value.trim();
+            if (!query) return;
+
+            const btn = document.getElementById('btn-confirm-origin');
+            const origHtml = btn.innerHTML;
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i>`;
+            btn.disabled = true;
+
+            try {
+                const candidates = await searchLocationCandidates(null, query);
+                if (candidates.length === 0) {
+                    showGpsError("<p>Endereço ou CEP de partida não encontrado em Mairiporã. Tente informar o nome da rua ou CEP.</p>");
+                } else if (candidates.length === 1) {
+                    updateActiveOrigin({
+                        name: candidates[0].displayName,
+                        shortName: candidates[0].displayName.split(',')[0],
+                        lat: candidates[0].lat,
+                        lng: candidates[0].lon
+                    }, "Endereço Manual");
+                } else {
+                    openAddressPickerModal(candidates, 'origin');
+                }
+            } finally {
+                btn.innerHTML = origHtml;
+                btn.disabled = false;
+            }
+        }
+
+        function onPrefeituraSelectChange() {
+            const idx = document.getElementById('calc-select').value;
+            const input = document.getElementById('calc-address');
+            if (idx !== "") {
+                const loc = locations[parseInt(idx)];
+                input.value = `${loc.name}, ${loc.address}, ${loc.number}, CEP ${loc.cepFormatted}`;
+            } else {
+                input.value = "";
+            }
+        }
+
+        function renderLocationsTable(dataToRender = null) {
+            const list = dataToRender || locations;
+            const tbody = document.getElementById('locations-table-body');
+            const mobileContainer = document.getElementById('locations-mobile-list');
+
+            if (tbody) tbody.innerHTML = '';
+            if (mobileContainer) mobileContainer.innerHTML = '';
+
+            if (list.length === 0) {
+                if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-gray-500">Nenhum ponto encontrado.</td></tr>`;
+                if (mobileContainer) mobileContainer.innerHTML = `<div class="p-4 text-center text-xs text-gray-500">Nenhum ponto encontrado.</div>`;
+                return;
+            }
+
+            list.forEach((loc, index) => {
+                // Tabela (Desktop)
+                if (tbody) {
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-gray-800/40 transition";
+                    tr.innerHTML = `
+                        <td class="p-3.5"><span class="px-2 py-0.5 bg-gray-800 text-gray-300 rounded font-semibold text-[10px] border border-gray-700">${loc.secretaria}</span></td>
+                        <td class="p-3.5 font-bold text-white">${loc.name}</td>
+                        <td class="p-3.5">${loc.address}, ${loc.number}</td>
+                        <td class="p-3.5">${loc.neighborhood}</td>
+                        <td class="p-3.5 font-mono text-brand-400">${loc.cepFormatted}</td>
+                        <td class="p-3.5 text-gray-400">${loc.phone || '--'}</td>
+                        <td class="p-3.5 text-center">
+                            <button onclick="editLocation(${index})" class="text-brand-400 hover:text-brand-300 px-2 py-1"><i class="fa-solid fa-pen"></i></button>
+                            <button onclick="deleteLocation(${index})" class="text-rose-400 hover:text-rose-300 px-2 py-1"><i class="fa-solid fa-trash"></i></button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                }
+
+                // Cards (Mobile)
+                if (mobileContainer) {
+                    const card = document.createElement('div');
+                    card.className = "p-3.5 space-y-2 bg-gray-900/60";
+                    card.innerHTML = `
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="px-2 py-0.5 bg-gray-800 text-gray-300 rounded font-semibold text-[10px] border border-gray-700">${loc.secretaria}</span>
+                            <div class="flex items-center gap-1">
+                                <button onclick="editLocation(${index})" class="text-brand-400 hover:text-brand-300 p-1.5"><i class="fa-solid fa-pen text-xs"></i></button>
+                                <button onclick="deleteLocation(${index})" class="text-rose-400 hover:text-rose-300 p-1.5"><i class="fa-solid fa-trash text-xs"></i></button>
+                            </div>
+                        </div>
+                        <h4 class="font-bold text-sm text-white">${loc.name}</h4>
+                        <div class="text-xs text-gray-300 space-y-0.5">
+                            <p class="flex items-center gap-1.5"><i class="fa-solid fa-location-dot text-brand-400 text-[11px]"></i> ${loc.address}, ${loc.number} - ${loc.neighborhood}</p>
+                            <div class="flex justify-between items-center pt-1 text-[11px]">
+                                <span class="font-mono text-brand-400">CEP: ${loc.cepFormatted}</span>
+                                <span class="text-gray-400">${loc.phone || ''}</span>
+                            </div>
+                        </div>
+                    `;
+                    mobileContainer.appendChild(card);
+                }
+            });
+        }
+
+        function filterLocationsTable() {
+            const query = document.getElementById('search-locations').value.toLowerCase();
+            const filtered = locations.filter(l => 
+                (l.secretaria && l.secretaria.toLowerCase().includes(query)) ||
+                (l.name && l.name.toLowerCase().includes(query)) ||
+                (l.address && l.address.toLowerCase().includes(query)) ||
+                (l.neighborhood && l.neighborhood.toLowerCase().includes(query)) ||
+                (l.cepFormatted && l.cepFormatted.includes(query))
+            );
+            renderLocationsTable(filtered);
+        }
+
+        function openLocationModal(editIndex = null) {
+            document.getElementById('form-location').reset();
+            if (editIndex !== null) {
+                const loc = locations[editIndex];
+                document.getElementById('loc-id').value = editIndex;
+                document.getElementById('loc-secretaria').value = loc.secretaria;
+                document.getElementById('loc-name').value = loc.name;
+                document.getElementById('loc-address').value = loc.address;
+                document.getElementById('loc-number').value = loc.number;
+                document.getElementById('loc-neighborhood').value = loc.neighborhood;
+                document.getElementById('loc-cep').value = loc.cepFormatted;
+                document.getElementById('loc-phone').value = loc.phone || '';
+                document.getElementById('modal-loc-title').innerText = "Editar Ponto";
+            } else {
+                document.getElementById('loc-id').value = "";
+                document.getElementById('modal-loc-title').innerText = "Cadastrar Novo Ponto";
+            }
+            document.getElementById('modal-location').classList.remove('hidden');
+        }
+
+        function closeLocationModal() {
+            document.getElementById('modal-location').classList.add('hidden');
+        }
+
+        function saveLocation(e) {
+            e.preventDefault();
+            const id = document.getElementById('loc-id').value;
+            const newLoc = {
+                secretaria: document.getElementById('loc-secretaria').value.trim().toUpperCase(),
+                name: document.getElementById('loc-name').value.trim(),
+                address: document.getElementById('loc-address').value.trim(),
+                number: document.getElementById('loc-number').value.trim() || 'SN',
+                neighborhood: document.getElementById('loc-neighborhood').value.trim(),
+                cepFormatted: formatCep(document.getElementById('loc-cep').value.trim()),
+                phone: document.getElementById('loc-phone').value.trim()
+            };
+
+            if (id !== "") {
+                locations[parseInt(id)] = newLoc;
+            } else {
+                locations.push(newLoc);
+            }
+
+            saveLocations();
+            populatePrefeituraDropdown();
+            renderLocationsTable();
+            closeLocationModal();
+        }
+
+        function editLocation(idx) { openLocationModal(idx); }
+
+        function deleteLocation(idx) {
+            if (confirm("Deseja realmente remover este ponto?")) {
+                locations.splice(idx, 1);
+                saveLocations();
+                populatePrefeituraDropdown();
+                renderLocationsTable();
+            }
+        }
+
+        function formatCep(cep) {
+            let clean = cep.replace(/\D/g, '');
+            if (!clean) return "07600-000";
+            clean = clean.padStart(8, '0');
+            return `${clean.substring(0,5)}-${clean.substring(5,8)}`;
+        }
+
+        // --- MAPA LEAFLET & CALCULADORA ---
+        function initMap() {
+            if (map) return;
+            
+            map = L.map('map', {
+                center: [activeOrigin.lat, activeOrigin.lng],
+                zoom: 15,
+                zoomControl: true
+            });
+
+            const esriTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19,
+                attribution: 'Tiles &copy; Esri &mdash; Mairiporã-SP'
+            });
+
+            esriTileLayer.addTo(map);
+
+            setTimeout(() => {
+                if (map) map.invalidateSize();
+            }, 300);
+
+            // Marcador da Origem Ativa
+            const dtiIcon = L.divIcon({
+                className: 'custom-dti-icon',
+                html: `<div style="background-color:#10b981;width:22px;height:22px;border-radius:50%;border:3px solid white;box-shadow:0 0 10px rgba(16,185,129,0.9);display:flex;align-items:center;justify-content:center;color:white;font-size:10px;"><i class="fa-solid fa-house"></i></div>`,
+                iconSize: [22, 22],
+                iconAnchor: [11, 11]
+            });
+
+            dtiMarker = L.marker([activeOrigin.lat, activeOrigin.lng], { icon: dtiIcon })
+                .addTo(map)
+                .bindPopup(`<b>PONTO DE PARTIDA ATIVO</b><br>${activeOrigin.name}`)
+                .openPopup();
+        }
+
+        // Busca unificada de candidatos (serve tanto para Origem quanto para Destino)
+        async function searchLocationCandidates(selectedLoc, inputSearch) {
+            let candidates = [];
+
+            if (selectedLoc) {
+                const cleanCep = selectedLoc.cepFormatted ? selectedLoc.cepFormatted.replace(/\D/g, '') : '';
+                const numStr = (selectedLoc.number && selectedLoc.number.toUpperCase() !== 'SN') ? selectedLoc.number : '';
+
+                // 1. PESQUISA A FUNDO POR CEP
+                if (cleanCep && cleanCep.length === 8 && cleanCep !== '07600000') {
+                    try {
+                        const viacepResp = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
+                        const viacepData = await viacepResp.json();
+                        if (viacepData && viacepData.logradouro) {
+                            const viaStreet = viacepData.logradouro;
+                            const viaBairro = viacepData.bairro || selectedLoc.neighborhood || '';
+                            
+                            if (numStr) {
+                                candidates = await geocodeAddressCandidates(`${viaStreet}, ${numStr}, Mairiporã, SP`);
+                            }
+                            if (candidates.length === 0) {
+                                candidates = await geocodeAddressCandidates(`${viaStreet}, ${viaBairro}, Mairiporã, SP`);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn("Falha no lookup de ViaCEP:", e);
+                    }
+                }
+
+                // 2. PESQUISA POR RUA SANITIZADA E NÚMERO
+                if (candidates.length === 0) {
+                    const cleanStreet = cleanAddressString(selectedLoc.address);
+                    if (cleanStreet) {
+                        if (numStr) {
+                            candidates = await geocodeAddressCandidates(`${cleanStreet}, ${numStr}, Mairiporã, SP`);
+                        }
+                        if (candidates.length === 0 && selectedLoc.neighborhood) {
+                            candidates = await geocodeAddressCandidates(`${cleanStreet}, ${selectedLoc.neighborhood}, Mairiporã, SP`);
+                        }
+                        if (candidates.length === 0) {
+                            candidates = await geocodeAddressCandidates(`${cleanStreet}, Mairiporã, SP`);
+                        }
+                    }
+                }
+
+                // 3. PESQUISA POR NOME DA UNIDADE / BAIRRO
+                if (candidates.length === 0 && selectedLoc.name) {
+                    const cleanName = cleanAddressString(selectedLoc.name);
+                    candidates = await geocodeAddressCandidates(`${cleanName}, Mairiporã, SP`);
+                }
+
+                if (candidates.length === 0 && selectedLoc.neighborhood) {
+                    candidates = await geocodeAddressCandidates(`${selectedLoc.neighborhood}, Mairiporã, SP`);
+                }
+            }
+
+            // Digitação manual no campo de texto
+            if (candidates.length === 0 && inputSearch) {
+                const cepMatch = inputSearch.match(/\d{5}-?\d{3}/);
+                if (cepMatch) {
+                    const cleanCepManual = cepMatch[0].replace(/\D/g, '');
+                    try {
+                        const vResp = await fetch(`https://viacep.com.br/ws/${cleanCepManual}/json/`);
+                        const vData = await vResp.json();
+                        if (vData && vData.logradouro) {
+                            candidates = await geocodeAddressCandidates(`${vData.logradouro}, Mairiporã, SP`);
+                        }
+                    } catch(e){}
+                }
+
+                if (candidates.length === 0) {
+                    let cleanQuery = cleanAddressString(inputSearch);
+                    candidates = await geocodeAddressCandidates(`${cleanQuery}, Mairiporã, SP`);
+                }
+            }
+
+            return candidates;
+        }
+
+        async function calculateDistance() {
+            const inputSearch = document.getElementById('calc-address').value.trim();
+            const selectValue = document.getElementById('calc-select').value;
+            let selectedLoc = null;
+
+            if (selectValue !== "") {
+                selectedLoc = locations[parseInt(selectValue)];
+            } else if (inputSearch !== "") {
+                selectedLoc = locations.find(l => 
+                    l.name.toLowerCase().includes(inputSearch.toLowerCase()) || 
+                    l.address.toLowerCase().includes(inputSearch.toLowerCase()) ||
+                    l.cepFormatted.includes(inputSearch)
+                );
+            }
+
+            if (!inputSearch && !selectedLoc) {
+                showGpsError("<p>Por favor, selecione um destino da Prefeitura ou digite um endereço/CEP.</p>");
+                return;
+            }
+
+            const btn = document.getElementById('btn-calc-dist');
+            const originalBtn = btn.innerHTML;
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Pesquisando Destino...`;
+            btn.disabled = true;
+
+            try {
+                const candidates = await searchLocationCandidates(selectedLoc, inputSearch);
+
+                if (candidates.length === 0) {
+                    throw new Error("Nenhum endereço de destino foi localizado dentro de Mairiporã. Verifique o número ou o CEP cadastrado.");
+                }
+
+                // Exibe o modal com os resultados encontrados para confirmação do destino
+                openAddressPickerModal(candidates, 'destination');
+
+            } catch (err) {
+                showGpsError(`<p>${err.message || "Não foi possível localizar o endereço solicitado."}</p>`);
+            } finally {
+                btn.innerHTML = originalBtn;
+                btn.disabled = false;
+            }
+        }
+
+        // Função de Sanitização de Endereços/Ruas
+        function cleanAddressString(str) {
+            if (!str) return "";
+            let cleaned = str;
+            cleaned = cleaned.replace(/^[A-Z\s]+ - /i, '');
+            cleaned = cleaned.replace(/,\s*(PE|VER|DR|DRA|PROF|PROFA|ENG|CEL|CAP|MAJ|TEN|SGT|CB|SD|PADRE|MONS|DOM|STA|STO|SÃO|SAO)\b/gi, '');
+            cleaned = cleaned.replace(/\b(ESF|UBS|EM|CEM|CAPS|UPA|CRAS|CREAS|DTI|GGIM)\b/gi, '');
+            return cleaned.replace(/\s+/g, ' ').trim();
+        }
+
+        // Busca coordenadas candidatas via Nominatim OpenStreetMap restrito a Mairiporã/SP
+        async function geocodeAddressCandidates(query) {
+            try {
+                const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=br&limit=5&addressdetails=1`;
+                const resp = await fetch(url, {
+                    headers: { 'Accept-Language': 'pt-BR' }
+                });
+                if (!resp.ok) return [];
+                const data = await resp.json();
+                return data
+                    .filter(item => {
+                        const disp = (item.display_name || '').toLowerCase();
+                        return disp.includes('mairiporã') || disp.includes('mairipora') || disp.includes('terra preta');
+                    })
+                    .map(item => ({
+                        lat: parseFloat(item.lat),
+                        lon: parseFloat(item.lon),
+                        displayName: item.display_name
+                    }));
+            } catch (e) {
+                console.warn("Erro na geocodificação:", e);
+                return [];
+            }
+        }
+
+        function openAddressPickerModal(candidates, targetRole = 'destination', customTitle = null) {
+            const listEl = document.getElementById('address-candidates-list');
+            const titleEl = document.getElementById('address-picker-title');
+            const subtitleEl = document.getElementById('address-picker-subtitle');
+            
+            listEl.innerHTML = '';
+
+            if (targetRole === 'origin') {
+                titleEl.innerHTML = `<i class="fa-solid fa-circle-dot text-emerald-400"></i> Confirme o Ponto de Partida (Origem)`;
+                subtitleEl.innerText = `Clique no endereço correto de onde o veículo vai sair:`;
+            } else {
+                titleEl.innerHTML = `<i class="fa-solid fa-location-crosshairs text-brand-500"></i> Confirme o Destino Encontrado`;
+                subtitleEl.innerText = `Clique no local correto para calcular a rota a partir de ${activeOrigin.shortName || activeOrigin.name}:`;
+            }
+
+            candidates.forEach((cand) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = "w-full text-left p-3 bg-gray-950 hover:bg-brand-500/10 hover:border-brand-500/40 border border-gray-800 rounded-xl transition space-y-1 group cursor-pointer";
+                btn.onclick = () => {
+                    if (targetRole === 'origin') {
+                        const label = customTitle || cand.displayName;
+                        updateActiveOrigin({
+                            name: label,
+                            shortName: label.split(',')[0],
+                            lat: cand.lat,
+                            lng: cand.lon
+                        }, originMode === 'prefeitura' ? "Ponto Prefeitura" : "Endereço Manual");
+                    } else {
+                        renderRouteOnMap(cand.lat, cand.lon, cand.displayName);
+                    }
+                    closeAddressPickerModal();
+                };
+
+                btn.innerHTML = `
+                    <div class="flex items-start gap-2.5">
+                        <div class="p-2 ${targetRole === 'origin' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-brand-500/10 text-brand-400'} rounded-lg mt-0.5">
+                            <i class="fa-solid fa-location-dot"></i>
+                        </div>
+                        <div>
+                            <p class="text-xs font-semibold text-gray-200 group-hover:text-brand-400 transition">${cand.displayName.split(',')[0]}</p>
+                            <p class="text-[11px] text-gray-400 leading-relaxed">${cand.displayName}</p>
+                        </div>
+                    </div>
+                `;
+                listEl.appendChild(btn);
+            });
+
+            const modal = document.getElementById('modal-address-picker');
+            modal.classList.remove('hidden');
+        }
+
+        function closeAddressPickerModal() {
+            document.getElementById('modal-address-picker').classList.add('hidden');
+        }
+
+        // --- CÁLCULO DE ROTAS PELAS VIAS (OSRM API) ---
+        async function renderRouteOnMap(destLat, destLng, labelText) {
+            if (!map) initMap();
+
+            // Limpar marcações e rotas anteriores
+            if (destinationMarker) map.removeLayer(destinationMarker);
+            clearRoutePolylines();
+
+            // Garantir que o marcador de origem está na coordenada ativa
+            if (dtiMarker) {
+                dtiMarker.setLatLng([activeOrigin.lat, activeOrigin.lng]);
+                dtiMarker.setPopupContent(`<b>PONTO DE PARTIDA:</b><br>${activeOrigin.name}`);
+            }
+
+            // Marcador de Destino
+            const destIcon = L.divIcon({
+                className: 'custom-dest-icon',
+                html: `<div style="background-color:#ef4444;width:24px;height:24px;border-radius:50%;border:3px solid white;box-shadow:0 0 12px rgba(239,68,68,0.9);display:flex;align-items:center;justify-content:center;color:white;font-size:11px;"><i class="fa-solid fa-flag-checkered"></i></div>`,
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+            });
+
+            destinationMarker = L.marker([destLat, destLng], { icon: destIcon })
+                .addTo(map)
+                .bindPopup(`<b>DESTINO CONFIRMADO:</b><br>${labelText}`)
+                .openPopup();
+
+            const originShort = activeOrigin.shortName || activeOrigin.name.split(',')[0];
+            const destShort = labelText.split(',')[0];
+            document.getElementById('trip-destination').value = `${originShort} ➔ ${destShort}`;
+
+            // Chamar API de Roteamento OSRM (Vias reais com alternativas)
+            try {
+                const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${activeOrigin.lng},${activeOrigin.lat};${destLng},${destLat}?overview=full&geometries=geojson&alternatives=true`;
+                const response = await fetch(osrmUrl);
+                const data = await response.json();
+
+                if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+                    availableRoutes = data.routes;
+                    selectedRouteIndex = 0;
+                    displayRoutesOnMap(destLat, destLng);
+                } else {
+                    // Fallback para linha reta caso OSRM falhe
+                    fallbackStraightLine(destLat, destLng);
+                }
+            } catch (e) {
+                console.warn("Erro ao buscar rota no OSRM, usando fallback:", e);
+                fallbackStraightLine(destLat, destLng);
+            }
+        }
+
+        function clearRoutePolylines() {
+            routePolylines.forEach(p => map.removeLayer(p));
+            routePolylines = [];
+        }
+
+        function displayRoutesOnMap(destLat, destLng) {
+            clearRoutePolylines();
+            const optionsContainer = document.getElementById('route-options-list');
+            optionsContainer.innerHTML = '';
+
+            const bounds = L.latLngBounds([
+                [activeOrigin.lat, activeOrigin.lng],
+                [destLat, destLng]
+            ]);
+
+            availableRoutes.forEach((route, index) => {
+                const isSelected = (index === selectedRouteIndex);
+                const coords = route.geometry.coordinates.map(c => [c[1], c[0]]); // GeoJSON [lng, lat] para Leaflet [lat, lng]
+                
+                const distanceKm = (route.distance / 1000).toFixed(2);
+                const durationMin = Math.round(route.duration / 60);
+
+                // Desenhar linhas no mapa (Selecionada em destaque azul, alternativas em cinza)
+                const polyline = L.polyline(coords, {
+                    color: isSelected ? '#0ea5e9' : '#64748b',
+                    weight: isSelected ? 6 : 4,
+                    opacity: isSelected ? 0.9 : 0.5,
+                    dashArray: isSelected ? null : '6, 6'
+                }).addTo(map);
+
+                // Evento ao clicar na linha da rota no próprio mapa
+                polyline.on('click', () => selectRouteOption(index));
+
+                routePolylines.push(polyline);
+
+                // Criar card de opção de rota para o motorista clicar
+                const optBtn = document.createElement('button');
+                optBtn.type = 'button';
+                optBtn.onclick = () => selectRouteOption(index);
+                optBtn.className = `p-2.5 rounded-xl border text-left transition flex items-center justify-between ${
+                    isSelected 
+                        ? 'bg-brand-500/20 border-brand-500 text-white font-semibold shadow-md' 
+                        : 'bg-gray-950/60 border-gray-800 text-gray-400 hover:bg-gray-800/40 hover:text-gray-200'
+                }`;
+
+                const summaryName = route.legs[0]?.summary ? `via ${route.legs[0].summary}` : `Opção de Trajeto ${index + 1}`;
+
+                optBtn.innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid ${isSelected ? 'fa-circle-dot text-brand-400' : 'fa-circle text-gray-600'} text-xs"></i>
+                        <div>
+                            <p class="text-xs font-bold leading-tight ${isSelected ? 'text-brand-300' : 'text-gray-300'}">${summaryName}</p>
+                            <span class="text-[10px] text-gray-400 font-normal">Estimativa de tempo: ~${durationMin} min</span>
+                        </div>
+                    </div>
+                    <span class="text-xs font-mono font-black ${isSelected ? 'text-emerald-400' : 'text-gray-400'}">${distanceKm} km</span>
+                `;
+
+                optionsContainer.appendChild(optBtn);
+            });
+
+            // Atualizar valor principal de destaque da rota selecionada
+            const selRoute = availableRoutes[selectedRouteIndex];
+            const selDistKm = (selRoute.distance / 1000).toFixed(2);
+            const selDuration = Math.round(selRoute.duration / 60);
+
+            document.getElementById('dist-result-box').classList.remove('hidden');
+            document.getElementById('calc-dist-val').innerText = `${selDistKm} km (~${selDuration} min pelas vias)`;
+
+            // Ajustar zoom do mapa para caber toda a rota
+            map.fitBounds(bounds, { padding: [50, 50] });
+        }
+
+        function selectRouteOption(index) {
+            selectedRouteIndex = index;
+            const destLoc = destinationMarker.getLatLng();
+            displayRoutesOnMap(destLoc.lat, destLoc.lng);
+        }
+
+        function fallbackStraightLine(destLat, destLng) {
+            clearRoutePolylines();
+            const distKm = calculateHaversineDistance(activeOrigin.lat, activeOrigin.lng, destLat, destLng);
+
+            const polyline = L.polyline([
+                [activeOrigin.lat, activeOrigin.lng],
+                [destLat, destLng]
+            ], { color: '#0ea5e9', weight: 4, opacity: 0.85, dashArray: '6, 6' }).addTo(map);
+
+            routePolylines.push(polyline);
+
+            document.getElementById('route-options-list').innerHTML = `
+                <div class="col-span-2 text-xs text-amber-400 bg-amber-500/10 p-2 rounded-lg border border-amber-500/20">
+                    <i class="fa-solid fa-triangle-exclamation"></i> Vias não mapeadas diretamente; calculando em linha direta (Haversine).
+                </div>
+            `;
+
+            document.getElementById('dist-result-box').classList.remove('hidden');
+            document.getElementById('calc-dist-val').innerText = `${distKm.toFixed(2)} km (Linha Reta)`;
+
+            map.fitBounds(L.latLngBounds([
+                [activeOrigin.lat, activeOrigin.lng],
+                [destLat, destLng]
+            ]), { padding: [50, 50] });
+        }
+
+        function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+
+        function updateTimer() {
+            if (!trackingStartTime) return;
+            const now = new Date();
+            const diffMs = now - trackingStartTime;
+            const secs = Math.floor((diffMs / 1000) % 60);
+            const mins = Math.floor((diffMs / (1000 * 60)) % 60);
+            const hrs = Math.floor(diffMs / (1000 * 60 * 60));
+
+            document.getElementById('gps-timer').innerText = 
+                `${String(hrs).padStart(2,'0')}:${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+        }
+
+        // --- LANÇAMENTOS / HISTÓRICO ---
+        function loadLogs() {
+            const saved = localStorage.getItem('fleet_logs_v1');
+            if (saved) {
+                try { logs = JSON.parse(saved); } catch(e) { logs = []; }
+            }
+        }
+
+        function saveLogsToStorage() {
+            localStorage.setItem('fleet_logs_v1', JSON.stringify(logs));
+        }
+
+        function renderLogsTable() {
+            const tbody = document.getElementById('logs-table-body');
+            const mobileContainer = document.getElementById('logs-mobile-list');
+
+            if (tbody) tbody.innerHTML = '';
+            if (mobileContainer) mobileContainer.innerHTML = '';
+
+            if (logs.length === 0) {
+                if (tbody) tbody.innerHTML = `<tr><td colspan="11" class="p-4 text-center text-gray-500">Nenhum registro cadastrado.</td></tr>`;
+                if (mobileContainer) mobileContainer.innerHTML = `<div class="p-4 text-center text-xs text-gray-500">Nenhum registro cadastrado.</div>`;
+                return;
+            }
+
+            logs.forEach((log, idx) => {
+                const media = (log.liters && log.kmDiff) ? (log.kmDiff / log.liters).toFixed(2) : '--';
+                
+                // Desktop Table Row
+                if (tbody) {
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-gray-800/40 transition";
+                    tr.innerHTML = `
+                        <td class="p-3.5">${new Date(log.datetime).toLocaleString('pt-BR')}</td>
+                        <td class="p-3.5 font-semibold text-white">${log.driver}</td>
+                        <td class="p-3.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold ${log.type === 'Abastecimento' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-brand-500/20 text-brand-400 border border-brand-500/30'}">${log.type}</span></td>
+                        <td class="p-3.5 text-gray-300">${log.destination || '--'}</td>
+                        <td class="p-3.5 text-right font-mono">${log.kmStart || '--'}</td>
+                        <td class="p-3.5 text-right font-mono">${log.kmEnd || '--'}</td>
+                        <td class="p-3.5 text-right font-mono font-bold text-brand-400">${log.kmDiff || '--'} km</td>
+                        <td class="p-3.5 text-right font-mono">${log.liters ? log.liters + ' L' : '--'}</td>
+                        <td class="p-3.5 text-right font-mono">${log.price ? 'R$ ' + parseFloat(log.price).toFixed(2) : '--'}</td>
+                        <td class="p-3.5 text-center font-mono font-bold text-emerald-400">${media}</td>
+                        <td class="p-3.5 text-center">
+                            <button onclick="deleteLog(${idx})" class="text-rose-400 hover:text-rose-300 px-2 py-1"><i class="fa-solid fa-trash"></i></button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                }
+
+                // Mobile Card View
+                if (mobileContainer) {
+                    const card = document.createElement('div');
+                    card.className = "p-3.5 space-y-2.5 bg-gray-900/60";
+                    card.innerHTML = `
+                        <div class="flex items-center justify-between text-xs">
+                            <span class="text-gray-400">${new Date(log.datetime).toLocaleString('pt-BR')}</span>
+                            <div class="flex items-center gap-2">
+                                <span class="px-2 py-0.5 rounded text-[10px] font-bold ${log.type === 'Abastecimento' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-brand-500/20 text-brand-400 border border-brand-500/30'}">${log.type}</span>
+                                <button onclick="deleteLog(${idx})" class="text-rose-400 hover:text-rose-300 p-1"><i class="fa-solid fa-trash text-xs"></i></button>
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <h4 class="font-bold text-sm text-white">${log.driver}</h4>
+                            <span class="text-xs font-bold text-brand-400 font-mono">${log.kmDiff ? log.kmDiff + ' km' : '--'}</span>
+                        </div>
+                        <p class="text-xs text-gray-300"><i class="fa-solid fa-location-dot text-gray-500 text-[11px] mr-1"></i> ${log.destination || 'Sem destino cadastrado'}</p>
+                        <div class="grid grid-cols-2 gap-2 pt-2 border-t border-gray-800 text-[11px] text-gray-400">
+                            <div>Km Início/Fim: <span class="text-gray-200 font-mono">${log.kmStart || '--'} / ${log.kmEnd || '--'}</span></div>
+                            <div class="text-right">Média: <span class="text-emerald-400 font-bold font-mono">${media} km/L</span></div>
+                        </div>
+                    `;
+                    mobileContainer.appendChild(card);
+                }
+            });
+        }
+
+        function setDefaultDate() {
+            const now = new Date();
+            now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+            document.getElementById('log-datetime').value = now.toISOString().slice(0, 16);
+        }
+
+        function toggleLogTypeFields() {
+            const type = document.getElementById('log-type').value;
+            if (type === 'Abastecimento') {
+                document.getElementById('fuel-fields').classList.remove('hidden');
+            } else {
+                document.getElementById('fuel-fields').classList.add('hidden');
+            }
+        }
+
+        function calcKmDiff() {
+            const start = parseFloat(document.getElementById('log-km-start').value);
+            const end = parseFloat(document.getElementById('log-km-end').value);
+            if (!isNaN(start) && !isNaN(end) && end >= start) {
+                document.getElementById('log-km-diff').value = (end - start).toFixed(2);
+            }
+        }
+
+        function openLogModal() {
+            document.getElementById('form-log').reset();
+            setDefaultDate();
+            toggleLogTypeFields();
+            document.getElementById('modal-log').classList.remove('hidden');
+        }
+
+        function closeLogModal() {
+            document.getElementById('modal-log').classList.add('hidden');
+        }
+
+        function saveLog(e) {
+            e.preventDefault();
+            const newLog = {
+                datetime: document.getElementById('log-datetime').value,
+                driver: document.getElementById('log-driver').value.trim(),
+                type: document.getElementById('log-type').value,
+                destination: document.getElementById('trip-destination').value.trim(),
+                kmStart: parseFloat(document.getElementById('log-km-start').value) || null,
+                kmEnd: parseFloat(document.getElementById('log-km-end').value) || null,
+                kmDiff: parseFloat(document.getElementById('log-km-diff').value) || null,
+                liters: parseFloat(document.getElementById('log-liters').value) || null,
+                price: parseFloat(document.getElementById('log-price').value) || null,
+                notes: document.getElementById('log-notes').value.trim()
+            };
+
+            logs.unshift(newLog);
+            saveLogsToStorage();
+            renderLogsTable();
+            closeLogModal();
+        }
+
+        function deleteLog(idx) {
+            if (confirm("Deseja excluir este registro?")) {
+                logs.splice(idx, 1);
+                saveLogsToStorage();
+                renderLogsTable();
+            }
+        }
+
+        // --- IMPORTAÇÃO DE PLANILHA EXCEL (.XLSX) ---
+        function handleExcelImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+
+                    if (!jsonData || jsonData.length === 0) {
+                        alert("A planilha selecionada está vazia ou não possui dados válidos.");
+                        return;
+                    }
+
+                    const importedLocations = [];
+
+                    jsonData.forEach(row => {
+                        const getVal = (...keys) => {
+                            for (const k of keys) {
+                                const foundKey = Object.keys(row).find(rk => rk.trim().toLowerCase() === k.toLowerCase());
+                                if (foundKey && row[foundKey] !== undefined && row[foundKey] !== "") {
+                                    return String(row[foundKey]).trim();
+                                }
+                            }
+                            return "";
+                        };
+
+                        const secretaria = getVal("Secretaria", "SEC", "Departamento") || "GERAL";
+                        const name = getVal("Local", "Nome", "Unidade", "Prédio", "Ponto") || "Ponto Não Identificado";
+                        const address = getVal("Endereço", "Endereco", "Rua", "Logradouro", "Av") || "";
+                        const number = getVal("Número", "Numero", "Num", "Nº") || "SN";
+                        const neighborhood = getVal("Bairro", "Região", "Distrito") || "Mairiporã";
+                        const rawCep = getVal("CEP", "Cep");
+                        const phone = getVal("Telefone", "Tel", "Contato", "Fone") || "";
+
+                        if (name || address) {
+                            importedLocations.push({
+                                secretaria: secretaria.toUpperCase(),
+                                name: name,
+                                address: address,
+                                number: number,
+                                neighborhood: neighborhood,
+                                cepFormatted: formatCep(rawCep),
+                                phone: phone
+                            });
+                        }
+                    });
+
+                    if (importedLocations.length === 0) {
+                        alert("Não foram encontrados pontos válidos na planilha. Certifique-se de que a planilha contenha colunas como 'Secretaria', 'Local', 'Endereço', etc.");
+                        return;
+                    }
+
+                    const replaceAll = confirm(`Foram encontrados ${importedLocations.length} pontos na planilha.\n\nClique em OK para SUBSTITUIR toda a lista atual de pontos.\nClique em CANCELAR para APENAS ADICIONAR (mesclar) os novos pontos aos existentes.`);
+
+                    if (replaceAll) {
+                        locations = importedLocations;
+                    } else {
+                        locations = [...locations, ...importedLocations];
+                    }
+
+                    saveLocations();
+                    populatePrefeituraDropdown();
+                    renderLocationsTable();
+                    alert(`Sucesso! ${importedLocations.length} pontos da prefeitura foram carregados e salvos.`);
+                } catch (err) {
+                    console.error(err);
+                    alert("Erro ao processar o arquivo Excel. Verifique se o arquivo está no formato .xlsx ou .xls correto.");
+                } finally {
+                    event.target.value = "";
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // EXPORTAÇÃO CSV
+        function exportToCSV() {
+            if (logs.length === 0) {
+                alert("Não há registros no histórico para exportar.");
+                return;
+            }
+
+            let csv = "Data/Hora;Motorista;Tipo;Destino;Km Inicial;Km Final;Km Rodado;Litros;Valor R$;Observacoes\n";
+            logs.forEach(l => {
+                csv += `"${l.datetime}";"${l.driver}";"${l.type}";"${l.destination || ''}";"${l.kmStart || ''}";"${l.kmEnd || ''}";"${l.kmDiff || ''}";"${l.liters || ''}";"${l.price || ''}";"${l.notes || ''}"\n`;
+            });
+
+            const blob = new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Controle_Frota_Mairipora_${new Date().toISOString().slice(0,10)}.csv`;
+            a.click();
+        }
+    </script>
+</body>
+</html>
